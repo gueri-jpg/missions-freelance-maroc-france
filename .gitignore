@@ -1,0 +1,45 @@
+# ─── Données scrapées / générées (NE PAS publier : contiennent des noms de
+#     contacts recruteurs et des données personnelles de tiers) ───────────────
+*.xlsx
+*.xls
+cache_annonces_*.json
+annonces_vues.json
+annonces_vues.json.*
+_DERNIERE_MAJ.txt
+
+# Sauvegardes & journaux
+_backup_*
+*.bak
+*.bak_*
+*.log
+logs/
+
+# Fichiers temporaires / de test
+_test_*
+_rescrape*
+_similaires*
+_speed_test*
+_ref_base.json
+_recup_urls.json
+_urls_a_recuperer.json
+_new_offers.pkl
+
+# Documents d'appels d'offres / DCE (lourds, non code, potentiellement sensibles)
+DCE_des_Offres/
+*.zip
+*.pdf
+*.docx
+*.pptx
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+
+# OS / éditeurs
+Thumbs.db
+.DS_Store
+.vscode/
+.idea/
