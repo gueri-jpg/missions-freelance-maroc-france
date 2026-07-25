@@ -31,6 +31,12 @@ DCE_des_Offres/
 *.docx
 *.pptx
 
+# Cache du filtre de similarité (jugements Gemini + embeddings du profil)
+cache_gemini.json
+cache_gemini.json.tmp
+.cache_embeddings_ideal.pt
+_calibration.log
+
 # Python
 __pycache__/
 *.pyc

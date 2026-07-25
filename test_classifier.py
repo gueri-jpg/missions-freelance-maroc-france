@@ -385,6 +385,25 @@ class TestMultiEsn(unittest.TestCase):
                        TODAY)
         self.assertFalse(b["hors_domaine"])
 
+    def test_trader_et_tests_sap_ecartes_mais_trading_fonctionnel_garde(self):
+        """2026-07-22 : le scrape par pôles ramenait des rôles opérationnels
+        (traders) et QA (analystes tests SAP) qui passaient les binaires. Ce sont
+        des RÔLES hors périmètre, à écarter. PIÈGE : "BA / FO Trading Application"
+        (BA fonctionnel sur une appli de trading) reste, lui, dans le périmètre."""
+        base = {"entite": "X", "emploi_label": "Freelance", "date_pub": "2026-07-20",
+                "texte": "Mission freelance en régie pour une banque. TJM."}
+        for poste in ("Trader EIS Index H/F", "QIS Trader H/F",
+                      "Analyste Tests & Validation SAP S/4HANA FICO",
+                      "Analyste de Tests SAP S/4HANA SD/MM"):
+            a = classifier({**base, "poste": poste}, TODAY)
+            self.assertTrue(a["hors_domaine"], f"devrait etre ecarte : {poste}")
+        for poste in ("Business Analyst Trading Application",
+                      "Business Analyst trading Fixed income",
+                      "Business Analyst Salle des Marchés"):
+            a = classifier({**base, "poste": poste}, TODAY)
+            self.assertFalse(a["hors_domaine"],
+                             f"'trading' (fonctionnel) ne doit PAS etre ecarte : {poste}")
+
     def test_lot_20_juillet_ecarte(self):
         """10 offres rejetees explicitement par l'utilisatrice le 2026-07-20."""
         base = {"emploi_label": "Freelance", "date_pub": "2026-07-14"}

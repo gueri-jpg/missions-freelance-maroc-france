@@ -164,6 +164,16 @@ QUERIES = [   # base partagée (rôle + banque + génériques régie)
     "chef de projet IT banque", "PMO senior banque",
     "conduite du changement banque", "chef de projet transformation bancaire",
     "gouvernance projet banque", "directeur de projet banque",
+    # --- RECHERCHE PILOTEE PAR LES POLES + COMPETENCES (2026-07-22) ----------
+    # L'utilisatrice veut que le PROFIL IDEAL et ses COMPETENCES interviennent
+    # DANS LA RECHERCHE, pas seulement dans le filtre. On cherche donc
+    # directement AMOA/CP dans ses 11 poles + ses savoir-faire cles, en banque.
+    "AMOA crédit banque", "AMOA monétique banque", "AMOA salle des marchés",
+    "AMOA KYC conformité banque", "AMOA risques bancaires",
+    "AMOA gestion d'actifs banque", "AMOA bancassurance",
+    "AMOA cash management banque", "chef de projet SIRH banque",
+    "AMOA cahier des charges banque", "AMOA recette banque",
+    "consultant AMOA fonctionnel banque",
 ]
 # Requêtes ciblées par pays : banques qui cherchent un freelance EN DIRECT
 BANK_QUERIES = {
@@ -600,9 +610,42 @@ def to_annonce(card, detail):
     }
 
 
+def _appliquer_similarite(conv):
+    """Calcule le filtre de SIMILARITÉ (embeddings + Gemini) sur les offres
+    CONVENABLES et pose les champs sim_* sur chaque annonce. Ne PAIE que les
+    NOUVELLES offres (cache Gemini). Dégrade sans planter : si le module ou la
+    clé sont absents, les offres reçoivent sim_verdict "À VÉRIFIER (Gemini
+    indisponible)" et ne sont JAMAIS perdues (l'appelant les garde)."""
+    if not conv:
+        return
+    try:
+        import similarite as SIM
+        res = SIM.similarite(conv)                 # cache -> coût = nouvelles seulement
+        for a, r in zip(conv, res):
+            a["sim_score"] = r["score_global"]
+            a["sim_verdict"] = SIM.verdict_similarite(r)
+            a["sim_pole"] = r["pole_principal"]
+            a["sim_raison"] = r["raison"]
+            a["sim_semantique"] = r["score_semantique"]
+            a["sim_lexical"] = r["score_lexical"]
+    except Exception as e:
+        print(f"  ! filtre de similarité indisponible ({e}) — offres marquées "
+              f"à vérifier, aucune perdue.")
+        for a in conv:
+            a.setdefault("sim_score", None)
+            a["sim_verdict"] = "À VÉRIFIER (Gemini indisponible)"
+            a.setdefault("sim_pole", "")
+            a.setdefault("sim_raison", "")
+            a.setdefault("sim_semantique", None)
+            a.setdefault("sim_lexical", None)
+
+
 def process_country(cc, annonces, vues, today):
     """annonces (multi-sources) -> classification complète -> fusion historique."""
     items = classify_all(annonces, today)
+    # Filtre de SIMILARITÉ au-dessus des 4 filtres binaires : uniquement sur les
+    # convenables (économie d'appels Gemini). Voir _appliquer_similarite.
+    _appliquer_similarite([a for a in items if a["verdict"] != "ÉCARTÉE"])
 
     # Horodatage REEL (date + heure) de ce passage.
     now_disp = dt.datetime.now().strftime("%d/%m/%Y %H:%M")
@@ -654,9 +697,16 @@ HEADERS2 = ["", "poste", "mission", "entité", "ville", "exigence", "lieu",
             "contact recrutement", "durée", "SOURCE", "publication",
             "VERDICT", "type réel", "banque", "cœur métier", "candidats",
             "âge (j)", "fenêtre", "multi-ESN", "question B2B",
-            "1re détection", "dern. vérif.", "provenance"]
+            "1re détection", "dern. vérif.", "provenance",
+            # Colonnes du filtre de SIMILARITÉ (Gemini) — 2026-07-22
+            "score similarité", "pôle principal", "raison Gemini",
+            "score sémantique", "score lexical"]
 WIDTHS2 = [12, 30, 40, 22, 15, 13, 12, 16, 11, 14, 12,
-           16, 14, 10, 11, 11, 8, 12, 12, 42, 12, 12, 20]
+           16, 14, 10, 11, 11, 8, 12, 12, 42, 12, 12, 20,
+           14, 20, 50, 16, 12]
+# En-têtes des colonnes de similarité (ajoutées à la volée aux onglets existants).
+SIM_HEADERS = ["score similarité", "pôle principal", "raison Gemini",
+               "score sémantique", "score lexical"]
 
 VERDICT_FILL = {
     "★★ MATCH CŒUR": "C6EFCE",   # vert
@@ -859,13 +909,24 @@ def merge_reference(scraped_conv, ref_items):
 
 
 def is_convenable(a):
-    """Offre à retenir pour les onglets 'sourcing'."""
+    """Offre à retenir pour les onglets 'sourcing' (décide l'AJOUT d'une NOUVELLE
+    offre : elle doit être fraîche, en banque, dans le périmètre)."""
     v = a["verdict"]
     if v == "ÉCARTÉE":
         return False
     if DROP_VIVIER and v == "VIVIER":
         return False
     return True
+
+
+def _retirer_existant(a):
+    """Décide si une offre DÉJÀ dans le fichier doit être retirée. On ne retire
+    que pour une raison DURE (junk) — jamais pour l'âge/VIVIER : l'utilisatrice
+    veut conserver ses offres curées même une fois périmées (2026-07-22 :
+    « les offres data et autres qu'on a dans l'excel on les garde »). La fraîcheur
+    ne s'applique donc qu'aux NOUVELLES offres (cf. is_convenable)."""
+    return bool(a.get("hors_domaine") or a.get("banque") == "NON"
+                or a.get("type") == "recrutement")
 
 
 def write_excel(path, data_by_country, today):
@@ -952,6 +1013,12 @@ def _row_values_map(a, today):
         "1redetection": a.get("premiere_detection", today),
         "dernverif": a.get("derniere_verification", today),
         "provenance": source,
+        # Filtre de similarité (Gemini) — vide si non jugée
+        "scoresimilarite": a.get("sim_score") if a.get("sim_score") is not None else "",
+        "poleprincipal": a.get("sim_pole", ""),
+        "raisongemini": a.get("sim_raison", ""),
+        "scoresemantique": a.get("sim_semantique") if a.get("sim_semantique") is not None else "",
+        "scorelexical": a.get("sim_lexical") if a.get("sim_lexical") is not None else "",
     }
 
 
@@ -1064,6 +1131,15 @@ def update_excel(path, data_by_country, today):
         if not src_col or not poste_col:
             print(f"  ! [{title}] en-tete introuvable — onglet ignore.")
             continue
+        # Ajoute les colonnes de similarité si l'onglet ne les a pas encore
+        # (à DROITE des colonnes existantes -> n'altère ni l'ordre, ni les
+        # surlignages, ni les modifications de l'utilisatrice).
+        for h in SIM_HEADERS:
+            k = _colkey(h)
+            if k not in hmap:
+                col = (ws.max_column or 1) + 1
+                ws.cell(1, col).value = h
+                hmap[k] = col
         # 1) NETTOYAGE : retire les lignes devenues NON convenables (CDI seul,
         #    perimee, hors domaine...). On ne juge QUE les offres qu'on connait
         #    encore (presentes dans la classification) — jamais les autres.
@@ -1082,8 +1158,8 @@ def update_excel(path, data_by_country, today):
             if c.hyperlink:
                 a = juges.get(c.hyperlink.target.split("?")[0].rstrip("/"))
             if a is not None:
-                if not is_convenable(a):
-                    a_retirer.append(rr)      # jugee par le classifier
+                if _retirer_existant(a):
+                    a_retirer.append(rr)      # junk DUR seulement (pas l'âge)
             elif ent_col:
                 # Ligne INJUGEABLE (orpheline / sans lien) : filet de securite
                 # sur le NOM de l'employeur (grosses ESN CDI, clients finaux).
@@ -1137,18 +1213,51 @@ def update_excel(path, data_by_country, today):
                 if c.hyperlink and c.hyperlink.target.split("?")[0].rstrip("/") in vus:
                     ws.cell(rr, verif_col).value = today
 
-        added = 0
+        # Renseigne les colonnes de similarité pour les lignes EXISTANTES (elles
+        # restent, on ne fait qu'ajouter l'info dans des colonnes nouvelles).
+        sim_by_url = {(a.get("url") or "").split("?")[0].rstrip("/"): a for a in conv}
+        sim_keys = [("scoresimilarite", "sim_score"), ("poleprincipal", "sim_pole"),
+                    ("raisongemini", "sim_raison"),
+                    ("scoresemantique", "sim_semantique"),
+                    ("scorelexical", "sim_lexical")]
+        for rr in range(2, r + 1):
+            c = ws.cell(rr, src_col)
+            if not (c.hyperlink and c.hyperlink.target):
+                continue
+            a = sim_by_url.get(c.hyperlink.target.split("?")[0].rstrip("/"))
+            if not a:
+                continue
+            for colkey, field in sim_keys:
+                col = hmap.get(colkey)
+                if col and a.get(field) is not None:
+                    ws.cell(rr, col).value = a.get(field)
+
+        added, ignore_sim = 0, 0
         for a in conv:
             u = (a.get("url") or "").split("?")[0].rstrip("/")
             if u in existing:
                 continue                     # deja dans le fichier -> on n'y touche pas
             if not a.get("nouveau"):
                 continue                     # deja vue avant + absente = TU l'as supprimee
+            # GATE SIMILARITÉ (uniquement sur les NOUVELLES offres) : le scraper
+            # quotidien ne ramène que les offres proches de l'idéal. L'existant
+            # ci-dessus n'est jamais concerné (choix utilisatrice 2026-07-22).
+            sv = a.get("sim_verdict")
+            if sv == "HORS_PERIMETRE (similarité)":
+                ignore_sim += 1
+                continue                     # trop peu similaire -> pas ajoutée
+            # Le VERDICT affiché reflète la similarité, sauf CONVENABLE qui
+            # conserve le ★★ / ★ du classifieur.
+            if sv and sv != "CONVENABLE":
+                a["verdict"] = sv            # "À VÉRIFIER (similarité)" / "(Gemini indisponible)"
             r += 1
             _append_offer(ws, r, a, hmap, today)
             existing.add(u)
             added += 1
         total_add += added
+        if ignore_sim:
+            print(f"  [{title}] {ignore_sim} nouvelle(s) offre(s) écartée(s) par "
+                  f"le filtre de similarité (hors profil idéal).")
         ws.cell(1, 1).value = f"MISE A JOUR : {today}"
         print(f"  [{title}] {added} nouvelle(s) offre(s) ajoutee(s) a la suite.")
 

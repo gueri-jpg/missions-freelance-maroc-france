@@ -166,7 +166,18 @@ def collect_free_work(country="france", max_pages=6):
     # ("monétique" retire : le paiement est hors perimetre, c'etait 100% jete.)
     for kw in ["banque", "bancaire", "finance de marché", "crédit", "assurance",
                "PMO", "chef de projet IT", "pilotage de projet",
-               "conduite du changement", "chef de projet transformation"]:
+               "conduite du changement", "chef de projet transformation",
+               # Recherche pilotee par les POLES + COMPETENCES (2026-07-22),
+               # mais en ROLE + POLE (pas le pole seul, sinon on ramene les
+               # traders sur "salle des marches", les testeurs sur "monetique"...
+               # cf. remarque utilisatrice : resserrer sur CE QUI EST INCLUS).
+               "AMOA banque", "business analyst banque",
+               "AMOA salle des marchés", "AMOA finance de marché",
+               "AMOA monétique", "chef de projet monétique",
+               "AMOA gestion d'actifs", "AMOA asset management",
+               "AMOA KYC conformité", "business analyst risques bancaires",
+               "AMOA ALM", "AMOA bancassurance", "AMOA SIRH",
+               "AMOA cash management", "chef de projet AMOA banque"]:
         page = 1
         while page <= max_pages:
             params = {"contracts": "contractor", "searchKeywords": kw,

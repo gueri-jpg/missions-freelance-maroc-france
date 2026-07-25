@@ -170,6 +170,8 @@ EXCLUS_HARD_KW = [
     "recette",
     "homologateur", "homologation", "istqb", "alm octane", "hp alm",
     "quality assurance", "tests automatis", "qualification fonctionnelle",
+    "analyste test", "analyste de test", "test & validation", "tests & validation",
+    "test et validation",
     # FINANCE METIER *NON IT* (roles metier, pas pilotage) : le perimetre reste
     # le pilotage/AMOA/data IT bancaire. On garde ces ROLES exclus, mais PAS les
     # domaines valides par les tuteurs (ALM, Risques...) -> "liquidity",
@@ -221,6 +223,10 @@ EXCLUS_HARD_KW = [
     "support l2", "support l3", "support n2", "support n3", "run & support",
     # Inspection / audit bancaire (metier, pas IT) : CIC "Inspecteur/Inspectrice"
     "inspecteur", "inspectrice", "auditeur interne", "auditrice interne",
+    # Rôle OPÉRATIONNEL de marché (2026-07-22) : un "trader" opère le marché,
+    # ce n'est pas de l'AMOA/pilotage. NB : "trader" seul, pas "trading" —
+    # "BA / FO Trading Application" (BA fonctionnel) reste, lui, dans le périmètre.
+    "trader", "traders",
     # Reporting REGLEMENTAIRE / prudentiel (solvabilite, RWA, COREP/FINREP) :
     # NE SONT PLUS EXCLUS (2026-07-20). Les tuteurs valident "Risques" et "ALM"
     # comme poles, et "tableaux de bord BI / indicateurs de suivi" comme
@@ -323,6 +329,7 @@ EXCLUS_TECH_KW = [
     # pilotage. "Technico-Fonctionnel Peoplesoft" = ERP compta/conso + support.
     "peoplesoft", "sap fi", "sap mm", "oracle ebs", "sage x3", "cegid",
     "technico-fonctionnel", "technico fonctionnel",
+    "s/4hana", "s4hana", "sap fico", "sap sd", "sap fi-aa",
 ]
 
 # §2 — signaux RÉGIE FORTS : explicites, ils l'emportent même si l'employeur
