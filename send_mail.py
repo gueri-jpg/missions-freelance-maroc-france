@@ -14,13 +14,17 @@ from email.mime.text import MIMEText
 
 
 def envoyer_notification(xlsx_path, statut, resume=""):
-    smtp_server = os.environ.get("SMTP_SERVER")
-    smtp_port = int(os.environ.get("SMTP_PORT") or "587")
-    smtp_user = os.environ.get("SMTP_USER")
-    smtp_pass = os.environ.get("SMTP_PASS")
-    from_email = os.environ.get("FROM_EMAIL") or smtp_user
-    to_emails = os.environ.get("TUTOR_EMAILS", "")
-    cc_emails = os.environ.get("CC_EMAILS", "")
+    # .strip() sur toute valeur venant de l'env : un secret GitHub
+    # copié-collé peut embarquer un espace/retour à la ligne invisible (cas
+    # réel du 2026-08 sur GDRIVE_FOLDER_ID) qui fait échouer silencieusement
+    # la connexion SMTP ou l'auth sans message d'erreur clair.
+    smtp_server = (os.environ.get("SMTP_SERVER") or "").strip()
+    smtp_port = int((os.environ.get("SMTP_PORT") or "587").strip())
+    smtp_user = (os.environ.get("SMTP_USER") or "").strip()
+    smtp_pass = (os.environ.get("SMTP_PASS") or "").strip()
+    from_email = (os.environ.get("FROM_EMAIL") or "").strip() or smtp_user
+    to_emails = (os.environ.get("TUTOR_EMAILS") or "").strip()
+    cc_emails = (os.environ.get("CC_EMAILS") or "").strip()
 
     if not (smtp_server and smtp_user and smtp_pass and from_email and to_emails):
         print("  [mail] Envoi ignoré : variables SMTP manquantes "

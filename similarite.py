@@ -306,7 +306,7 @@ def _gemini_generate_sans_timeout(prompt):
     """Le VRAI appel réseau, sans aucune protection — encapsulé pour être
     exécuté sous garde-fou thread par `_gemini_generate`. Ne pas appeler
     directement en production (cf. incident 2026-08-04)."""
-    key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    key = (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip()
     if not key:
         raise RuntimeError("GEMINI_API_KEY non définie")
     modele = _MODELE_ACTIF or GEMINI_MODEL

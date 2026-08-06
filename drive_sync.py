@@ -34,7 +34,12 @@ def _service():
     global _SERVICE
     if _SERVICE is not None:
         return _SERVICE
-    key_json = os.environ.get("GDRIVE_SA_KEY_JSON")
+    # .strip() : un secret GitHub copié-collé peut embarquer un retour à la
+    # ligne final invisible (cas réel du 2026-08 : GDRIVE_FOLDER_ID terminé
+    # par \n, provoquant un "File not found" trompeur — l'ID semblait juste
+    # mais la requête cherchait un dossier dont l'ID se terminait par un saut
+    # de ligne). On nettoie systématiquement toute valeur venant de l'env.
+    key_json = (os.environ.get("GDRIVE_SA_KEY_JSON") or "").strip()
     if not key_json:
         raise RuntimeError("GDRIVE_SA_KEY_JSON non définie")
     info = json.loads(key_json)
@@ -44,7 +49,7 @@ def _service():
 
 
 def _folder_id():
-    fid = os.environ.get("GDRIVE_FOLDER_ID")
+    fid = (os.environ.get("GDRIVE_FOLDER_ID") or "").strip()
     if not fid:
         raise RuntimeError("GDRIVE_FOLDER_ID non définie")
     return fid
