@@ -123,11 +123,14 @@ NON_BANK_SECTOR_KW = [
 
 # §4 — cœur de métier CFConsulting
 COEUR_METIER_KW = [
-    "data", " bi ", "business intelligence", "power bi", "talend", " etl ",
+    " bi ", "business intelligence", "power bi", "talend", " etl ",
     "data gouvernance", "data governance", "data quality", "data analyst",
-    "data architect", "data engineer", "reporting", "tableau de bord",
+    "data architect", "data engineer", "tableau de bord",
     "décisionnel", "decisionnel", "migration de données", "migration de donnees",
-    "data steward", "datawarehouse", "data warehouse", "dataviz",
+    "data migration", "data steward", "datawarehouse", "data warehouse", "dataviz",
+    # reporting réglementaire / prudentiel (COREP/FINREP/RWA) et instruments
+    "reporting réglementaire", "reporting réglementaires", "reporting prudentiel",
+    "reporting solvabilité", "corep", "finrep", "rwa", "solvabilit",
 ]
 # §4 — domaines acceptés (perimetre valide par l'utilisatrice 2026-07-17) :
 # PMO / pilotage / gouvernance + AMOA / MOA / BA + Product Owner / Scrum.
@@ -138,12 +141,60 @@ DOMAINE_OK_KW = [
     "maîtrise d'ouvrage", "maitrise d'ouvrage", "scrum", "pilotage",
     "gouvernance", "conduite du changement", "chef de programme",
     "directeur de projet", "coordinateur projet",
+    "chargé de recette", "charge de recette", "chargée de recette",
 ]
+
+EXCLUS_SI_SEUL_KW = [
+    "urbanisation",
+    "recette", "homologation",
+]
+
+# Correctif 2 (2026-08-03) : famille infra/réseau/cyber, séparée de
+# EXCLUS_SI_SEUL_KW ci-dessus parce qu'elle est gardée par un signal de
+# pilotage PLUS LARGE (cf. SIGNAL_PILOTAGE_INFRA_KW) qui inclut "chef de
+# projet". Avant, "cybersécurité" restait en exclusion DURE (EXCLUS_HARD_KW) :
+# un titre "PMO Cybersécurité" était rejeté au 1er étage avant même que le
+# signal "pmo" ne soit pris en compte. "infrastructure"/"réseau" n'étaient
+# testés nulle part explicitement — une annonce réelle d'ingénieur infra dont
+# le corps cite incidemment "chef de projet" (le sien, pas le rôle demandé)
+# aurait pu se faufiler par défaut (aucun mot de DOMAINE_OK_KW nulle part).
+EXCLUS_INFRA_SEUL_KW = [
+    "infrastructure", "infra ", "réseau", "réseaux", "reseau", "reseaux",
+    "cyber", "cybersécurité", "cybersecurite", "cyber sécurité", "sécurité réseau",
+]
+
+SI_TOKEN_RE = re.compile(r"\bsi\b", re.I)
+
+# Signal de pilotage NARROW : garde EXCLUS_SI_SEUL_KW + le token "SI" isolé.
+# "chef de projet" est volontairement ABSENT ici (cf.
+# test_projet_si_urbanisation_ecarte, règle utilisatrice) : "Chef de Projet
+# Urbanisation SI" / "Chef de projet SI (H/F)" restent hors périmètre, un
+# "chef de projet SI" nu est trop générique pour attester du fonctionnel — il
+# faut un signal plus explicite (pmo/amoa/pilotage/agile/gouvernance...).
+SIGNAL_PILOTAGE_KW = [
+    "pmo", "pilotage", "gouvernance", "directeur de projet",
+    "amoa", "moa", "conduite du changement",
+    "copil", "coproj", "product owner", "business analyst",
+    "business analyste", "agile", "responsable applicatif",
+    "chargé de recette", "charge de recette", "chargée de recette",
+]
+
+# Signal de pilotage LARGE : ne garde QUE EXCLUS_INFRA_SEUL_KW. Un "Chef de
+# projet Infrastructure Réseaux" ou "Chef de programme Cybersécurité" est un
+# titre de pilotage à part entière (structure "chef de projet X" = pilote le
+# domaine X), contrairement au "SI" nu, acronyme trop générique et ambigu pour
+# porter la même présomption.
+SIGNAL_PILOTAGE_INFRA_KW = SIGNAL_PILOTAGE_KW + [
+    "chef de projet", "cheffe de projet", "chef de programme",
+    "project management officer",
+]
+
+PROJET_SI_RE = re.compile(r"\bprojet si\b", re.I)
 
 # §4a — exclusions DURES : jamais pertinent, meme si data/BI apparait.
 #   - paiement / monetique (regle utilisatrice : "les offres de paiement ne conviennent pas")
 #   - urbanisation / chef de projet SI (trop technique/architecture)
-#   - cyber, reseau, infra, prod, support
+#   - cyber, prod, support
 EXCLUS_HARD_KW = [
     # PAIEMENT / MONETIQUE : NE SONT PLUS EXCLUS (2026-07-20). Les tuteurs les
     # ont valides comme poles metier ("Paiements & Monetique") -> une mission
@@ -153,22 +204,22 @@ EXCLUS_HARD_KW = [
     # (Bloc "paiement/paiements/payment/monétique/sepa/encaissement/acquiring/
     # moyens de paiement/carte bancaire/tpe/fraude monétique" retire.)
     # urbanisation / projet SI purement technique
-    "urbanisation", "projet si", "si fonctionnel", "architecte si",
-    # cyber / reseau / infra / prod / support
-    # "cyber" seul ajoute le 2026-07-21 : "PMO cyber senior" (LeHibou, secteur
-    # banque) passait car seul "cybersécurité" etait exclu. La cyber n'est pas
-    # dans les 11 poles. Aucun mot bancaire ne contient "cyber" -> sans risque.
-    "cyber", "cybersécurité", "cybersecurite", "cyber sécurité", "sécurité réseau",
-    "réseaux", "reseaux", "réseau", "reseau", "infrastructure", "infra ",
+    "si fonctionnel", "architecte si",
+    # cyber / prod / support
+    # "cybersécurité" et "cyber" déplacés vers EXCLUS_SI_SEUL_KW le 2026-08-03
+    # (Correctif 2) : en exclusion DURE ici, un "PMO Cybersécurité" était
+    # rejeté avant même que le signal "pmo" ne soit pris en compte, alors que
+    # le principe directeur est "c'est le rôle qui décide, pas le domaine
+    # technique". Un cybersécurité SEUL (sans pilotage) reste écarté ; un PMO
+    # / AMOA / chef de projet sur un programme cyber reste dans le périmètre.
     "support n1", "support niveau 1", "support applicatif", "helpdesk",
     "hotline", "administrateur système", "administrateur réseau",
     "ingénieur de production", "ingenieur de production", "ingénieur de prod",
     "devops", "infogérance", "infogerance", "run applicatif", "supervision",
     "openshift",
-    # QA / test / recette (regle utilisatrice 2026-07-17)
+    # QA / test (regle utilisatrice 2026-07-17) ; recette fonctionnelle est gardee
     "test lead", "test manager", "testeur", "testeuse", " qa ", "qa automation",
-    "recette",
-    "homologateur", "homologation", "istqb", "alm octane", "hp alm",
+    "homologateur", "istqb", "alm octane", "hp alm",
     "quality assurance", "tests automatis", "qualification fonctionnelle",
     "analyste test", "analyste de test", "test & validation", "tests & validation",
     "test et validation",
@@ -319,7 +370,8 @@ EXCLUS_TECH_KW = [
     "développeur", "developpeur", "développeuse", "dévelopement",
     "développement", "developpement", "lead developer", "tech lead",
     "concepteur-développeur", "intégrateur", "integrateur", "moe", "amoe",
-    "architecte technique", "architecte solution", "architecte d'intégration",
+    "architecte technique", "architecte solution",
+    "data scientist", "scientist", "mlops", "machine learning",
     "java", "j2ee", "cobol", "pacbase", "murex", "calypso", "sophis",
     "summit", "loaniq", "loan iq", "temenos", " t24 ", "amplitude", " sab ",
     "kafka", "angular", "react", "spring", "springboot", "python", "c++",
@@ -327,9 +379,7 @@ EXCLUS_TECH_KW = [
     "frontend", "front-end", "mainframe", "ios", "android", "drupal", "odoo",
     # ERP / progiciels tres specifiques (2026-07-20) : profil expert-outil, pas
     # pilotage. "Technico-Fonctionnel Peoplesoft" = ERP compta/conso + support.
-    "peoplesoft", "sap fi", "sap mm", "oracle ebs", "sage x3", "cegid",
-    "technico-fonctionnel", "technico fonctionnel",
-    "s/4hana", "s4hana", "sap fico", "sap sd", "sap fi-aa",
+    "peoplesoft", "sap fi", "sap mm", "oracle ebs", "sage x3", "cegid", "s/4hana", "s4hana", "sap fico", "sap sd", "sap fi-aa",
 ]
 
 # §2 — signaux RÉGIE FORTS : explicites, ils l'emportent même si l'employeur
@@ -714,47 +764,75 @@ def detect_banque(poste, texte, entite):
 def detect_domaine(poste, texte):
     """Décision sur le TITRE (le corps ne sert qu'à confirmer), en 3 étages :
 
-    1. EXCLUSION DURE  -> paiement/monétique, urbanisation/projet SI, cyber,
-       réseau, infra, prod, support : hors périmètre quoi qu'il arrive.
+    1. EXCLUSION DURE  ->  urbanisation, cyber,
+       prod, support : hors périmètre quoi qu'il arrive.
     2. DATA/BI = CŒUR MÉTIER -> prioritaire : un 'Data Engineer Teradata' est
        gardé alors qu'un 'Développeur Java' est écarté.
     3. EXCLUSION TECHNIQUE -> dev / stacks / outils métier (Java, Murex, COBOL...).
-    Sinon : PMO / AMOA / BA / PO = domaine OK.
+    "Sinon : PMO / AMOA / BA / PO = domaine OK.
     """
+    # compute pilotage signal early so all return sites can include it
+    pilotage_fort = has_any(poste, SIGNAL_PILOTAGE_INFRA_KW)
+
     # 1) Exclusions dures (titre)
     if has_any(poste, EXCLUS_HARD_KW):
-        return False, False, True
+        return False, False, True, pilotage_fort
 
-    # 1bis) PAIEMENT DANS LE TEXTE : DESACTIVE le 2026-07-20. Le paiement /
+    # 1a) Recette / homologation - seules les missions fonctionnelles de type
+    # "chargé de recette" restent dans le périmètre. Les autres rôles de test
+    # / homologation restent exclus.
+    if has_any(poste, ["recette", "homologation"]):
+        if not has_any(poste, ["chargé de recette", "charge de recette", "chargée de recette"]):
+            return False, False, True, pilotage_fort
+
+    # 1bis) Exclusions conditionnelles : certains mots technico-fonctionnels
+    # n'écartent que les profils techniques purs. Un "Chef de projet
+    # Infrastructure" reste fonctionnel, mais un "Ingénieur Infrastructure"
+    # est hors périmètre. Un "Chef de projet SI" sans signal pilotage/AMOA/PO
+    # reste hors périmètre.
+    blob = f"{poste} {texte}"
+    if ((has_any(blob, EXCLUS_SI_SEUL_KW)
+            or PROJET_SI_RE.search(blob)
+            or SI_TOKEN_RE.search(poste))
+            and not has_any(blob, SIGNAL_PILOTAGE_KW)):
+        return False, False, True, pilotage_fort
+
+    # 1bis-b) Famille infra/réseau/cyber (Correctif 2) : gardée par le signal
+    # de pilotage LARGE (inclut "chef de projet") — cf. SIGNAL_PILOTAGE_INFRA_KW.
+    if (has_any(blob, EXCLUS_INFRA_SEUL_KW)
+            and not has_any(blob, SIGNAL_PILOTAGE_INFRA_KW)):
+        return False, False, True, pilotage_fort
+
+    # 1ter) PAIEMENT DANS LE TEXTE : DESACTIVE le 2026-07-20. Le paiement /
     # monetique est desormais un pole metier valide (decision tuteurs) -> on ne
     # jette plus une mission parce que son sujet est le paiement. (PAIEMENT_FORT_KW
     # et PAIEMENT_TEXTE_KW conserves comme documentation, plus utilises ici.)
 
-    # 1ter) EMPILEMENT DE CERTIFICATIONS SI (cf. CERTIF_SI_KW) : profil certifiant,
+    # 1quater) EMPILEMENT DE CERTIFICATIONS SI (cf. CERTIF_SI_KW) : profil certifiant,
     # pas une mission -> hors perimetre.
     if sum(1 for k in CERTIF_SI_KW
            if has_any(f"{poste} {texte}", [k])) >= SEUIL_CERTIF:
-        return False, False, True
+        return False, False, True, pilotage_fort
 
     # 1quater) DISPOSITIFS FISCAUX REGLEMENTAIRES (cf. FINANCE_REG_TEXTE_KW) dans
     # le texte -> finance metier fiscal, hors perimetre.
     if has_any(texte, FINANCE_REG_TEXTE_KW):
-        return False, False, True
+        return False, False, True, pilotage_fort
 
     # 2) Data/BI dans le titre => cœur métier, gardé même si techno citée
     coeur_t = has_any(poste, COEUR_METIER_KW)
     dok_t = has_any(poste, DOMAINE_OK_KW)
     if coeur_t:
-        return True, dok_t, False
+        return True, dok_t, False, pilotage_fort
 
     # 3) Dev / stack technique (sans data) => hors périmètre
     if has_any(poste, EXCLUS_TECH_KW):
-        return False, False, True
+        return False, False, True, pilotage_fort
 
     coeur = has_any(texte, COEUR_METIER_KW)
     dok = dok_t or has_any(texte, DOMAINE_OK_KW)
     hors = not (coeur or dok)          # aucun domaine cible => hors périmètre
-    return coeur, dok, hors
+    return coeur, dok, hors, pilotage_fort
 
 
 def fenetre_from_age(age, cloturee, republie, nb_cand=None, open_confirme=False):
@@ -805,7 +883,7 @@ def classifier(annonce, today=None):
     ville = annonce.get("ville", "") or annonce.get("lieu", "")
     typ, regie_signal = detect_type(poste, texte, entite, emploi_label)
     banque = detect_banque(poste, texte, entite)
-    coeur, dok, hors_domaine = detect_domaine(poste, texte)
+    coeur, dok, hors_domaine, pilotage_fort = detect_domaine(poste, texte)
     # Hors France+Maroc -> ecarte (cf. hors_geographie).
     if hors_geographie(poste, ville):
         coeur, dok, hors_domaine = False, False, True
@@ -827,6 +905,7 @@ def classifier(annonce, today=None):
         "coeur_metier": coeur,
         "domaine_ok": dok,
         "hors_domaine": hors_domaine,
+        "pilotage_fort": pilotage_fort,
         "date_pub_iso": date_iso,
         "date_source": date_src,
         "age_jours": age,
@@ -865,7 +944,7 @@ def verdict_of(a):
         return "ÉCARTÉE", ("âge" if fen == "AGEE" else "date inconnue")
 
     # Ici : banque OUI/PROBABLE, domaine OK, type régie/à confirmer, fenêtre ouverte
-    if typ == "mission_regie" and a["coeur_metier"]:
+    if typ == "mission_regie" and (a["coeur_metier"] or a.get("pilotage_fort")):
         return "★★ MATCH CŒUR", ""
     if typ == "mission_regie" and a["domaine_ok"]:
         return "★ À SAISIR", ""

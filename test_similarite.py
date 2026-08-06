@@ -5,6 +5,7 @@ Ne consomme donc pas de quota Gemini et tourne sans sentence-transformers."""
 import json
 import os
 import tempfile
+import time
 import unittest
 
 import similarite as S
@@ -65,10 +66,10 @@ class FauxEncodeur:
         out = []
         for t in textes:
             tl = t.lower()
-            if any(k in tl for k in self.NEG):
-                out.append([0.0, 1.0])
-            elif any(k in tl for k in self.POS):
+            if any(k in tl for k in self.POS):
                 out.append([1.0, 0.0])
+            elif any(k in tl for k in self.NEG):
+                out.append([0.0, 1.0])
             else:
                 out.append([0.5, 0.5])
         return out
@@ -144,6 +145,32 @@ class TestGemini(BaseSim):
         S.juge_gemini([offre("AMOA A"), offre("PMO B")], profil_txt="P")
         self.assertEqual(faux.appels, 2)
 
+    def test_correctif6_prompt_version_invalide_le_cache(self):
+        """Une entrée jugée sous un ANCIEN prompt_version est ré-évaluée, pas
+        lue telle quelle (sinon un changement de prompt/profil ne se propage
+        jamais aux offres déjà en cache)."""
+        faux = FauxGemini("ok")
+        S._gemini_generate = faux
+        S.juge_gemini([offre("AMOA A")], profil_txt="P")
+        self.assertEqual(faux.appels, 1)
+        # même offre, mais la version courante du prompt a changé entre-temps
+        ancienne_version = S.PROMPT_VERSION
+        S.PROMPT_VERSION = ancienne_version + "-modifie"
+        try:
+            S.juge_gemini([offre("AMOA A")], profil_txt="P")
+            self.assertEqual(faux.appels, 2)          # re-jugée, pas servie du cache
+        finally:
+            S.PROMPT_VERSION = ancienne_version
+
+    def test_correctif6_vider_cache_gemini(self):
+        faux = FauxGemini("ok")
+        S._gemini_generate = faux
+        S.juge_gemini([offre("AMOA A")], profil_txt="P")
+        self.assertTrue(os.path.exists(S.CACHE_GEMINI))
+        self.assertTrue(S.vider_cache_gemini())
+        self.assertFalse(os.path.exists(S.CACHE_GEMINI))
+        self.assertFalse(S.vider_cache_gemini())          # déjà absent -> False
+
     def test_lots_de_dix(self):
         faux = FauxGemini("ok")
         S._gemini_generate = faux
@@ -185,6 +212,28 @@ class TestGemini(BaseSim):
         S._gemini_generate = faux
         r = S.juge_gemini([offre("AMOA banque")], profil_txt="P")
         self.assertEqual(r[0]["verdict_gemini"], "A_VERIFIER (Gemini indisponible)")
+
+    def test_gemini_timeout_ne_bloque_pas_indefiniment(self):
+        """Incident 2026-08-04 : une connexion Gemini restée ÉTABLIE sans
+        jamais répondre a bloqué le run 6h30 (ni le SDK ni son timeout
+        interne n'ont réagi). Le garde-fou thread doit couper après
+        GEMINI_TIMEOUT + 10s, quoi qu'il arrive côté SDK."""
+        orig_sans_timeout = S._gemini_generate_sans_timeout
+        orig_timeout, orig_marge = S.GEMINI_TIMEOUT, S.GEMINI_TIMEOUT_MARGE
+        S.GEMINI_TIMEOUT, S.GEMINI_TIMEOUT_MARGE = 0.05, 0.05   # -> coupe a 0.1s
+
+        def bloque_indefiniment(prompt):
+            time.sleep(2)                           # >> attente totale (0.1s)
+            return "ne devrait jamais etre lu"
+
+        S._gemini_generate_sans_timeout = bloque_indefiniment
+        try:
+            with self.assertRaises(RuntimeError) as ctx:
+                S._gemini_generate("prompt")
+            self.assertIn("timeout", str(ctx.exception).lower())
+        finally:
+            S._gemini_generate_sans_timeout = orig_sans_timeout
+            S.GEMINI_TIMEOUT, S.GEMINI_TIMEOUT_MARGE = orig_timeout, orig_marge
 
 
 # ═══════════════════════════════════════════════════════════════════════════

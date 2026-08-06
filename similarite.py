@@ -19,6 +19,7 @@ Contraintes tenues :
     absente / quota 429 -> on marque "A_VERIFIER (...)", jamais de crash.
   * cache (cache_gemini.json) : une annonce déjà jugée n'est jamais re-payée.
 """
+import concurrent.futures
 import hashlib
 import json
 import os
@@ -48,6 +49,21 @@ EMB_SEUIL_PREFILTRE = int(os.environ.get("EMB_SEUIL_PREFILTRE", "35"))
 GEMINI_BATCH = int(os.environ.get("GEMINI_BATCH", "10"))
 GEMINI_DELAI = float(os.environ.get("GEMINI_DELAI", "1.0"))     # pause entre lots
 GEMINI_BACKOFF = float(os.environ.get("GEMINI_BACKOFF", "20.0"))  # pause sur 429
+# Incident du 2026-08-04 : le run de 07h00 est resté bloqué 6h30, une connexion
+# TCP à l'API Gemini restant ÉTABLIE sans jamais répondre — ni le SDK
+# `google-genai` ni l'ancien `google-generativeai` n'ont de timeout par défaut,
+# et le paramètre de timeout du SDK récent (HttpOptions) est connu pour ne pas
+# toujours être honoré (cf. googleapis/python-genai#911, #1330). D'où un
+# GARDE-FOU au niveau thread (_gemini_generate), indépendant du SDK : si l'appel
+# ne revient pas dans GEMINI_TIMEOUT secondes, on abandonne et on traite ça
+# comme une erreur Gemini normale (repli/backoff existant, jamais de blocage).
+GEMINI_TIMEOUT = float(os.environ.get("GEMINI_TIMEOUT", "60.0"))
+# Marge au-dessus de GEMINI_TIMEOUT avant que le garde-fou thread ne coupe
+# (laisse une chance au timeout du SDK, quand il fonctionne, de se déclencher
+# le premier). Constante séparée pour que les tests puissent la réduire sans
+# changer GEMINI_TIMEOUT lui-même.
+GEMINI_TIMEOUT_MARGE = float(os.environ.get("GEMINI_TIMEOUT_MARGE", "10.0"))
+_GEMINI_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="gemini-call")
 
 # Seuils de décision (calibrés le 2026-07-22 sur le fichier trié : bonnes offres
 # médiane 90, technique/hors-secteur 0-45, zone limite 50-70). Réglage STRICT
@@ -55,17 +71,29 @@ GEMINI_BACKOFF = float(os.environ.get("GEMINI_BACKOFF", "20.0"))  # pause sur 42
 SIM_SEUIL_HAUT = int(os.environ.get("SIM_SEUIL_HAUT", "75"))   # >= -> CONVENABLE
 SIM_SEUIL_BAS = int(os.environ.get("SIM_SEUIL_BAS", "55"))     # < -> écartée
 
-PROFIL_PATH = os.path.join(OUTDIR, "profil_ideal.txt")
+PROFIL_PATH = os.path.join(OUTDIR, "profil_ideal_corrige.txt")
+if not os.path.exists(PROFIL_PATH):
+    PROFIL_PATH = os.path.join(OUTDIR, "profil_ideal.txt")
+# Correctif 6 (2026-08-03) : le cache est indexé sur sha1(titre + mission),
+# insensible à un changement de PROMPT ou de PROFIL — un jugement rendu sous
+# une ancienne règle (ex. l'ancienne contrainte de pôle, avant le 12e pôle)
+# restait donc lu tel quel indéfiniment. PROMPT_VERSION est stocké DANS chaque
+# entrée et vérifié à la lecture (indépendamment de CACHE_VERSION, qui lui
+# change la CLÉ de hash — utile pour un changement de format d'offre, pas pour
+# un changement de jugement). Incrémenter à chaque modification de
+# construire_prompt() / CONTRE_EXEMPLES / du profil idéal.
+PROMPT_VERSION = os.environ.get("GEMINI_PROMPT_VERSION", "2026-08-03-pole12-c5c8")
+CACHE_VERSION = int(os.environ.get("GEMINI_CACHE_VERSION", "2"))
 CACHE_GEMINI = os.path.join(OUTDIR, "cache_gemini.json")
 EMB_CACHE = os.path.join(OUTDIR, ".cache_embeddings_ideal.pt")
 
 # Contre-exemples : ce qui N'EST PAS pour CFConsulting (cadre le jugement Gemini).
 CONTRE_EXEMPLES = [
-    "cybersécurité pure (pilotage ou expertise sécurité), même en banque",
+    "expertise ou ingénierie cybersécurité (le PILOTAGE d'un programme sécurité en banque reste dans le périmètre)",
     "développement backend / devops / intégration technique sans dimension "
     "fonctionnelle (AMOA/MOA)",
     "poste en CDI interne d'une banque cliente (recrutement pour son effectif)",
-    "infogérance, support N1/N2, exploitation, run applicatif",
+    "infogérance, support N1/N2, exploitation, run applicatif — en tant que rôle tenu par le consultant",
     "vente/édition d'un progiciel en tant qu'éditeur du logiciel",
     "missions hors du secteur banque / finance / assurance",
 ]
@@ -113,13 +141,25 @@ def _texte_complet(offre):
 
 
 def _texte_court(offre):
-    """Texte pour les embeddings : titre + mission (cf. spec)."""
-    return (_titre(offre) + " " + _mission(offre)).strip()
+    """Texte pour les embeddings : titre + un extrait du texte COMPLET.
+
+    Avant 2026-08-02 : titre + `mission` (la colonne d'affichage Excel, 1re
+    phrase de l'annonce, <=160 caractères). Pour Free-Work, `mission` vaut
+    TOUJOURS la même chaîne fixe ("Mission freelance en régie.") quelle que
+    soit l'offre ; pour LinkedIn, la 1re phrase est souvent de l'auto-promo
+    du cabinet. Le pré-filtre n'avait donc quasiment aucun signal exploitable
+    et coupait à tort des offres neuves pourtant très pertinentes (score
+    sémantique proche de 0 alors que le score lexical, lui, dépassait 50-90).
+    On utilise maintenant un extrait du texte intégral de l'annonce, comme le
+    fait déjà `_texte_complet()` pour Gemini."""
+    texte = str(offre.get("texte", "") or "").strip()
+    extrait = texte[:600] if texte else _mission(offre)
+    return (_titre(offre) + " " + extrait).strip()
 
 
 def _cle(offre):
-    """Clé de cache = hash de (titre + mission), stable et insensible à la casse."""
-    base = (_titre(offre) + "||" + _mission(offre)).lower()
+    """Clé de cache = version + hash de (titre + mission), stable et insensible à la casse."""
+    base = (str(CACHE_VERSION) + "||" + _titre(offre) + "||" + _mission(offre)).lower()
     return hashlib.sha1(base.encode("utf-8")).hexdigest()
 
 
@@ -136,6 +176,18 @@ def _charger_cache():
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         return {}
+
+
+def vider_cache_gemini():
+    """Correctif 6 — CLI `--vider-cache-gemini` : supprime le cache en dur.
+    Sert en repli si l'on veut une purge immédiate au lieu d'attendre
+    l'invalidation paresseuse par PROMPT_VERSION (les deux mécanismes
+    coexistent ; celui-ci est explicite et total)."""
+    try:
+        os.remove(CACHE_GEMINI)
+        return True
+    except FileNotFoundError:
+        return False
 
 
 def _sauver_cache(cache):
@@ -186,14 +238,25 @@ def _vect(encoder, textes):
 
 def _embeddings_ideal(encoder, blocs):
     """Vecteurs des blocs de profil, mis en cache disque (recalcul si le profil
-    change : la clé inclut le nombre de blocs et un hash de leur contenu)."""
+    change : la clé inclut le nombre de blocs et un hash de leur contenu).
+
+    Garde-fou (ajouté le 2026-08-02) : un cache dont les vecteurs font moins de
+    16 dimensions est rejeté même si sig/modèle correspondent. De vrais
+    sentence-transformers rendent des vecteurs à plusieurs centaines de
+    dimensions (384 pour MiniLM) ; un cache à 2 dimensions ne peut venir que du
+    FauxEncodeur des tests (cf. test_similarite.py), qui a un jour écrasé le
+    fichier de production — ça a rendu le pré-filtre quasi aveugle pendant des
+    semaines (tous les scores écrasés près de 0, offres neuves coupées à tort)
+    sans qu'aucune erreur ne remonte, puisque le sig/modèle restaient valides."""
     sig = hashlib.sha1(("||".join(blocs)).encode("utf-8")).hexdigest()[:12]
     try:
         with open(EMB_CACHE, encoding="utf-8") as f:
             d = json.load(f)
-        if d.get("sig") == sig and d.get("modele") == EMB_MODEL_NOM:
-            return d["vecteurs"]
-    except (FileNotFoundError, json.JSONDecodeError, KeyError):
+        vecs = d.get("vecteurs") or []
+        if (d.get("sig") == sig and d.get("modele") == EMB_MODEL_NOM
+                and vecs and len(vecs[0]) >= 16):
+            return vecs
+    except (FileNotFoundError, json.JSONDecodeError, KeyError, IndexError, TypeError):
         pass
     vecteurs = _vect(encoder, blocs)
     try:
@@ -239,25 +302,49 @@ def pre_filtre_semantique(offres, seuil=None, blocs=None):
 # ═══════════════════════════════════════════════════════════════════════════
 #  ÉTAGE 2 — GEMINI (juge final)
 # ═══════════════════════════════════════════════════════════════════════════
-def _gemini_generate(prompt):
-    """SEUL point réseau. Lève une exception si SDK/clé absents ou erreur API.
-    La clé n'est JAMAIS logguée. Mocké dans les tests.
-
-    Compatible avec les DEUX SDK Google : le nouveau `google-genai` (préféré)
-    et l'ancien `google-generativeai` (déprécié mais encore fonctionnel)."""
+def _gemini_generate_sans_timeout(prompt):
+    """Le VRAI appel réseau, sans aucune protection — encapsulé pour être
+    exécuté sous garde-fou thread par `_gemini_generate`. Ne pas appeler
+    directement en production (cf. incident 2026-08-04)."""
     key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not key:
         raise RuntimeError("GEMINI_API_KEY non définie")
     modele = _MODELE_ACTIF or GEMINI_MODEL
+    timeout_ms = int(GEMINI_TIMEOUT * 1000)
     try:                                          # SDK récent : google-genai
         from google import genai
-        client = genai.Client(api_key=key)
+        from google.genai import types as genai_types
+        client = genai.Client(api_key=key,
+                               http_options=genai_types.HttpOptions(timeout=timeout_ms))
         return client.models.generate_content(model=modele, contents=prompt).text
     except ImportError:
         pass
     import google.generativeai as genai           # repli : ancien SDK
     genai.configure(api_key=key)
-    return genai.GenerativeModel(modele).generate_content(prompt).text
+    return genai.GenerativeModel(modele).generate_content(
+        prompt, request_options={"timeout": GEMINI_TIMEOUT}).text
+
+
+def _gemini_generate(prompt):
+    """SEUL point réseau. Lève une exception si SDK/clé absents, erreur API,
+    OU si l'appel dépasse GEMINI_TIMEOUT (incident 2026-08-04 : une connexion
+    Gemini restée ÉTABLIE sans réponse a bloqué tout le pipeline 6h30, le
+    timeout du SDK seul n'étant pas fiable). Le garde-fou thread ci-dessous
+    est indépendant du SDK : il fonctionne même si son propre timeout est
+    ignoré. La clé n'est JAMAIS logguée. Mocké dans les tests (en remplaçant
+    `_gemini_generate` lui-même, le thread n'entre donc jamais en jeu dans les
+    tests).
+
+    Compatible avec les DEUX SDK Google : le nouveau `google-genai` (préféré)
+    et l'ancien `google-generativeai` (déprécié mais encore fonctionnel)."""
+    attente = GEMINI_TIMEOUT + GEMINI_TIMEOUT_MARGE
+    futur = _GEMINI_EXECUTOR.submit(_gemini_generate_sans_timeout, prompt)
+    try:
+        return futur.result(timeout=attente)
+    except concurrent.futures.TimeoutError:
+        raise RuntimeError(
+            f"Gemini timeout : aucune réponse après {attente:.0f}s "
+            f"(connexion probablement restée ouverte sans répondre)")
 
 
 def construire_prompt(lot, profil_txt):
@@ -281,9 +368,9 @@ def construire_prompt(lot, profil_txt):
 
 === RÈGLES DE JUGEMENT (à respecter strictement) ===
 1. Juge la SIMILARITÉ DE FOND : le métier réellement demandé par la mission comparé à ce que CFConsulting sait faire (AMOA/MOA, PMO, cadrage, expression de besoin, spécifications, recette, conduite du changement, pilotage, gouvernance, BI fonctionnelle). NE te fie PAS à la simple présence de mots bancaires.
-1bis. RÈGLE DE MATCH POSITIF : si l'offre relève d'un des PÔLES VALIDES ET qu'elle demande une ou plusieurs des COMPÉTENCES du profil idéal ci-dessus (AMOA / expression de besoin, cahier des charges / spécifications fonctionnelles, ateliers métiers, recette / tests, conduite du changement, RACI, pilotage / PMO, gouvernance / COPIL, tableaux de bord BI fonctionnels), alors elle est CONVENABLE et doit recevoir un SCORE ÉLEVÉ (≥ 75) — même si elle n'est pas identique à l'offre de référence. Le profil idéal et l'offre de référence sont des EXEMPLES du savoir-faire, pas une liste fermée : toute mission fonctionnelle de ce type, dans un pôle valide, correspond.
-2. Une mission "cybersécurité en banque", "développeur backend en banque", "data engineer / data scientist", "support/run en banque" ou "intégration technique / architecture technique" doit scorer BAS malgré le vocabulaire bancaire : le métier n'est pas le nôtre (technique, pas fonctionnel AMOA/MOA).
-3. SECTEUR : le CLIENT FINAL de la mission doit RÉELLEMENT opérer dans la banque / finance / assurance, ET le sujet doit relever d'un des pôles valides. Une simple mention du mot "banque" ne suffit PAS : si le client est du retail, de l'industrie, de l'automobile, des télécoms, du secteur "Autre" ou public, ou si le secteur n'est pas explicitement bancaire/financier, scorer BAS (HORS_PERIMETRE).
+1bis. RÈGLE DE MATCH POSITIF : si l'offre demande une ou plusieurs des COMPÉTENCES du profil idéal ci-dessus (AMOA / expression de besoin, cahier des charges / spécifications fonctionnelles, ateliers métiers, recette / tests, conduite du changement, RACI, pilotage / PMO, gouvernance / COPIL, tableaux de bord BI fonctionnels) ET que le client final opère dans la banque / finance / assurance, alors elle est CONVENABLE et doit recevoir un SCORE ÉLEVÉ (≥ 75). Le pôle métier sert à CLASSER l'offre, pas à l'exclure : une mission de pilotage / gouvernance / conduite du changement sur un programme IT bancaire relève du pôle « Pilotage & Transformation IT bancaire » et vaut autant qu'un pôle métier.
+2. Attention toutefois : un rôle de PILOTAGE (PMO, AMOA, chef de projet, conduite du changement) sur un projet dont l'OBJET est technique (infrastructure, CMDB, ITSM, Digital Workplace, migration d'outil) reste DANS le périmètre — c'est le rôle qui décide, pas l'objet du projet. Ne scorent bas que les missions où le CONSULTANT LUI-MÊME fait de la technique.
+3. SECTEUR : le CLIENT FINAL de la mission doit RÉELLEMENT opérer dans la banque / finance / assurance. L'absence d'un pôle valide NE DOIT PAS à elle seule conduire à un score BAS si la mission est manifestement de pilotage/fonctionnelle pour un client bancaire. Une simple mention du mot "banque" ne suffit PAS : si le client est du retail, de l'industrie, de l'automobile, des télécoms, du secteur "Autre" ou public, ou si le secteur n'est pas explicitement bancaire/financier, scorer BAS (HORS_PERIMETRE).
 4. Sois factuel et concis, jamais flatteur. En cas de doute sérieux sur le secteur ou sur la nature fonctionnelle du métier, penche vers un score BAS (priorité : zéro faux positif).
 
 === OFFRES À ÉVALUER ===
@@ -404,7 +491,9 @@ def juge_gemini(offres, profil_txt=None):
     a_juger = []                                     # (index, offre)
     for i, o in enumerate(offres):
         c = cache.get(_cle(o))
-        if c is not None:
+        # Correctif 6 : une entrée jugée sous un ANCIEN prompt/profil est
+        # ignorée (traitée comme absente) -> réévaluée sous les règles actuelles.
+        if c is not None and c.get("prompt_version") == PROMPT_VERSION:
             resultats[i] = dict(c)
         else:
             a_juger.append((i, o))
@@ -418,6 +507,7 @@ def juge_gemini(offres, profil_txt=None):
             resultats[i] = res
             # on ne met en cache QUE les jugements aboutis (pas les "A_VERIFIER")
             if not str(res["verdict_gemini"]).startswith("A_VERIFIER"):
+                res["prompt_version"] = PROMPT_VERSION
                 cache[_cle(o)] = res
                 modifie = True
         if depart + GEMINI_BATCH < len(a_juger):

@@ -85,6 +85,50 @@ class TestType(unittest.TestCase):
             }, TODAY)
             self.assertTrue(a["hors_domaine"], f"{poste} devrait etre hors domaine")
 
+    def test_chef_de_projet_infra_reseau_cyber_est_garde(self):
+        """Correctif 2 (2026-08-03) : contrairement à « SI » nu (trop générique,
+        cf. test_projet_si_urbanisation_ecarte), « chef de projet » suffit à
+        sauver la famille infra/réseau/cyber — structure "chef de projet X" =
+        pilote le domaine X. Régression trouvée en complétant le Correctif 2 :
+        SIGNAL_PILOTAGE_KW (narrow) n'incluait pas "chef de projet", ce qui
+        aurait fait passer "Chef de projet Infrastructure Réseaux" à tort en
+        hors_domaine dès que "réseau" a rejoint EXCLUS_INFRA_SEUL_KW."""
+        for poste in ["Chef de projet Infrastructure Réseaux",
+                      "Chef de projet Infrastructure", "PMO Cybersécurité"]:
+            a = classifier({
+                "poste": poste, "entite": "Cabinet X",
+                "texte": "Mission freelance client bancaire. TJM.",
+                "date_pub": "2026-07-14", "emploi_label": "Freelance",
+            }, TODAY)
+            self.assertFalse(a["hors_domaine"], f"{poste} devrait rester dans le périmètre")
+
+    def test_projet_si_avec_signal_pilotage_est_domaine_ok(self):
+        """Chef de projet SI avec signal de pilotage/AMOA reste dans le périmètre."""
+        a = classifier({
+            "poste": "Chef de projet SI - pilotage", "entite": "Cabinet X",
+            "texte": "Mission freelance client bancaire. TJM.",
+            "date_pub": "2026-07-14", "emploi_label": "Freelance",
+        }, TODAY)
+        self.assertFalse(a["hors_domaine"])
+        self.assertTrue(a["domaine_ok"])
+
+    def test_infrastructure_sans_pilotage_est_ecarte_mais_avec_pilotage_est_garde(self):
+        """Base Infrastructure/recette est exclue seule, mais un PMO infra reste relevant."""
+        a = classifier({
+            "poste": "Ingénieur Infrastructure", "entite": "Cabinet X",
+            "texte": "Mission freelance client bancaire. TJM.",
+            "date_pub": "2026-07-14", "emploi_label": "Freelance",
+        }, TODAY)
+        self.assertTrue(a["hors_domaine"])
+
+        b = classifier({
+            "poste": "Chef de projet Infrastructure", "entite": "Cabinet X",
+            "texte": "Mission freelance client bancaire. Pilotage AMOA. TJM.",
+            "date_pub": "2026-07-14", "emploi_label": "Freelance",
+        }, TODAY)
+        self.assertFalse(b["hors_domaine"])
+        self.assertTrue(b["domaine_ok"])
+
     def test_dev_ecarte_mais_data_gardee(self):
         """RÈGLE MÉTIER : le dev/stack est exclu, MAIS la Data/BI reste le cœur
         métier (un 'Data Engineer Teradata' est gardé, un 'Dev Java' non)."""
@@ -347,14 +391,19 @@ class TestMultiEsn(unittest.TestCase):
         self.assertEqual(a["type"], "mission_regie")
 
     def test_qa_test_recette_ecarte(self):
-        """Regle utilisatrice 2026-07-17 : QA / test / recette hors perimetre."""
+        """Regle utilisatrice 2026-07-17 : QA / test hors perimetre, recette fonctionnelle gardee."""
         for poste in ("Test Lead assurance ISTQB - ALM Octane / HP ALM",
-                      "Testeur QA Automation - Robot Framework",
-                      "Chargé de recette / homologation SI bancaire"):
+                      "Testeur QA Automation - Robot Framework"):
             a = classifier({"poste": poste, "entite": "X",
                             "texte": "Mission freelance en régie pour une banque. TJM.",
                             "date_pub": "2026-07-14", "emploi_label": "Freelance"}, TODAY)
             self.assertTrue(a["hors_domaine"], f"devrait etre ecarte : {poste}")
+
+        b = classifier({"poste": "Chargé de recette / homologation SI bancaire",
+                        "entite": "X",
+                        "texte": "Mission freelance en régie pour une banque. TJM.",
+                        "date_pub": "2026-07-14", "emploi_label": "Freelance"}, TODAY)
+        self.assertFalse(b["hors_domaine"], "une mission de recette fonctionnelle SI bancaire doit rester dans le périmètre")
 
     def test_finance_metier_non_it_ecartee(self):
         """Regle utilisatrice 2026-07-17 : finance metier (non IT) hors perimetre."""
@@ -362,6 +411,47 @@ class TestMultiEsn(unittest.TestCase):
                       "Contrôleur de gestion banque", "Ingénieur quantitatif risques",
                       "Consultant Formateur IA, Secteur Bancaire H/F",
                       "CHEF DE PROJET IAM - assurances H/F"):
+            a = classifier({"poste": poste, "entite": "X",
+                            "texte": "Mission freelance en régie pour une banque. TJM.",
+                            "date_pub": "2026-07-14", "emploi_label": "Freelance"}, TODAY)
+            self.assertTrue(a["hors_domaine"], f"devrait etre ecarte : {poste}")
+
+    def test_jeu_de_test_titres_positifs(self):
+        titres = [
+            "Chef de projet Infrastructure / Gouvernance projets",
+            "PMO Infra / Production bancaire – Freelance (REF03)",
+            "Directeur de projet – domaine référentiel / urbanisation SI",
+            "Chef de projet SI – Agile / Jira / Confluence",
+            "Responsable applicatif / Chef de projet SI – BPM",
+            "Chef de projet SI / Chef de projet AMOA",
+            "Chef de projet Infrastructure Réseaux",
+            "Chef de projet SIRH Data Migration",
+            "PMO Chef de projet Simulation ALM",
+            "Chef de projet Sinistres",
+            "PMO Senior – Programme de transformation IT / bascule CMDB",
+            "Chargé de recette / homologation SI bancaire",
+            "PMO cyber senior – programme sécurité bancaire",
+        ]
+        for poste in titres:
+            a = classifier({"poste": poste, "entite": "X",
+                            "texte": "Mission freelance en régie pour une banque. TJM.",
+                            "date_pub": "2026-07-14", "emploi_label": "Freelance"}, TODAY)
+            self.assertFalse(a["hors_domaine"], f"devrait rester dans le périmètre : {poste}")
+
+    def test_jeu_de_test_titres_negatifs(self):
+        titres = [
+            "Ingénieur Infrastructure Cloud",
+            "Administrateur réseau senior",
+            "Expert Cybersécurité SOC",
+            "Ingénieur DevOps Kubernetes",
+            "Architecte Infrastructure",
+            "Technicien support N1",
+            "Test Manager SI bancaire",
+            "Testeur automaticien",
+            "Développeur Java Spring",
+            "Data Scientist / MLOps",
+        ]
+        for poste in titres:
             a = classifier({"poste": poste, "entite": "X",
                             "texte": "Mission freelance en régie pour une banque. TJM.",
                             "date_pub": "2026-07-14", "emploi_label": "Freelance"}, TODAY)

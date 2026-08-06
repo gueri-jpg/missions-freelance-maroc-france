@@ -1,0 +1,34 @@
+# Profil idéal CFConsulting — référence de "ce que le cabinet sait faire".
+# Éditable. Un BLOC par groupe, les blocs sont séparés par une LIGNE VIDE.
+# Les lignes commençant par # sont ignorées.
+# Les blocs "positifs" (savoir-faire) servent AUSSI au pré-filtre embeddings.
+# Le bloc PÔLES et le bloc CONTRE-EXEMPLES ne servent qu'au prompt Gemini.
+#
+# ---------------------------------------------------------------------------
+# RÉVISION 2026-07-30 — deux changements, tout le reste est inchangé :
+#   1) Ajout d'un 12e pôle « Pilotage & Transformation IT bancaire ». Motif : la
+#      mission de référence porte sur la modernisation d'outils de gestion
+#      d'infrastructure, qui ne relevait d'AUCUN des 11 pôles. Résultat observé :
+#      pôle "-" et score plafonné à 60, avec la raison Gemini « PMO pertinent
+#      mais sujet (modernisation outils infra) un peu à côté du cœur AMOA
+#      banque ». Le pré-filtre embeddings, lui, avait donné 78.
+#   2) Suppression de la formulation « le sujet de la mission DOIT relever de
+#      l'un d'eux », qui contredisait la dernière phrase du bloc OFFRE DE
+#      RÉFÉRENCE et poussait Gemini à trancher vers le bas (règle 4 du prompt).
+# ---------------------------------------------------------------------------
+
+Accompagnement AMOA dans le déploiement des salles des marchés en filiales ; indicateurs de suivi et de performance des activités FX / BONDS / ACTIONS ; paramétrage de K+TP ; automatisation des limites de marché ; mise en place de tableaux de bord BI.
+
+Organisation d'ateliers métiers pour cadrer les besoins clients ; rédaction du cahier des charges (spécifications fonctionnelles générales et détaillées, cartographie fonctionnelle, stratégie de tests) ; organisation des soutenances des éditeurs de logiciel et notation des short-listés ; accompagnement des métiers lors de la recette métier et en post-production.
+
+Accompagnement des métiers dans la phase d'expression de besoin ; rédaction des spécifications fonctionnelles détaillées ; coordination avec l'éditeur BFI, la DSI et les métiers ; mise en place d'une matrice RACI ; élaboration du cahier de recette ; conduite des tests de non-régression et des tests métiers ; conduite du changement (formation, refonte de processus, mise à jour de procédures, montée en compétences des équipes) ; support des équipes et gestion des tickets ouverts.
+
+Mission type PMO : pilotage de programme IT (planning, jalons, risques, dépendances, reporting) ; animation des instances de gouvernance (COPIL, COPROJ) ; conduite du changement ; production de synthèses exécutives ; gouvernance projet.
+
+Pilotage de programmes de transformation des services IT d'un client bancaire : structuration de la gouvernance projet, coordination de parties prenantes multiples (métiers, DSI, architecture, infrastructure, éditeurs et intégrateurs), animation des comités de pilotage et de suivi, conduite du changement et suivi des indicateurs d'adoption jusqu'au déploiement. Le pilotage porte sur le PROGRAMME, pas sur la technique : l'objet du projet peut être un outil d'infrastructure ou de gouvernance IT (référentiel d'actifs / CMDB, ITSM, socle collaboratif, poste de travail, Digital Workplace, Microsoft 365 / SharePoint, plateforme documentaire) sans que la mission cesse d'être fonctionnelle. Ce qui compte est le RÔLE tenu (PMO, gouvernance, conduite du changement, AMOA), pas la nature technique de l'outil déployé.
+
+OFFRE DE RÉFÉRENCE (exemple type, à considérer comme parfaitement convenable) — « PMO – pilotage de projets stratégiques IT » pour un client du secteur bancaire : PMO Senior renforçant le pilotage d'un projet stratégique ; structurer la gouvernance, coordonner les parties prenantes, accompagner la conduite du changement jusqu'au déploiement ; pilotage global du programme (planning, jalons, risques, dépendances, reporting) ; organiser et animer les instances de gouvernance (COPIL, COPROJ, ateliers) ; préparer les supports, comptes rendus et synthèses exécutives ; définir et mettre en œuvre les actions de communication et de conduite du changement ; suivre les indicateurs d'adoption ; produire la documentation de pilotage et de gouvernance. Compétences : PMO / pilotage de programmes IT, conduite du changement, méthodes de gouvernance projet, capacités rédactionnelles et de synthèse, coordination de multiples parties prenantes, maîtrise de PowerPoint / Teams / SharePoint et des outils de pilotage. Ce type de mission (PMO de pilotage / transformation IT en banque, y compris modernisation d'outils) est PLEINEMENT dans le périmètre et doit recevoir un score ÉLEVÉ (>= 75), son pôle étant « Pilotage & Transformation IT bancaire ».
+
+PÔLES MÉTIER VALIDES (le sujet de la mission relève normalement de l'un d'eux ; la liste est un référentiel de classement, pas un test d'exclusion) : Crédit & Engagement ; Salle des marchés ; Gestion d'actifs ; Intermédiation boursière ; Paiements & Monétique ; SIRH ; Risques ; Planification budgétaire ; Bancassurance ; KYC & Conformité ; ALM (gestion actif-passif) ; Pilotage & Transformation IT bancaire — ce dernier pôle couvre la gouvernance de programme, le PMO, la modernisation des outils de gestion IT (référentiel d'actifs / CMDB, ITSM, Digital Workplace, poste de travail, socle collaboratif, plateforme documentaire) et la conduite du changement / adoption utilisateurs, à la seule condition que le CLIENT FINAL soit une banque, une société financière ou un assureur. Ce 12e pôle n'est ni secondaire ni dégradé : il vaut autant que les onze autres.
+
+CRITÈRE DÉCISIF EN CAS DE DOUTE : c'est le RÔLE demandé qui tranche, pas le domaine technique du projet. Un PMO, un AMOA, un chef de projet ou un responsable de la conduite du changement qui pilote un projet d'infrastructure chez une banque est DANS le périmètre. Un ingénieur, un architecte technique, un administrateur, un développeur ou un profil de production / support est HORS périmètre, y compris sur un sujet fonctionnel.
