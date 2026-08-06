@@ -65,6 +65,15 @@ SIMILAR_SEEDS = int(os.getenv("LKD_SIMILAR_SEEDS", "25"))
 # offres publiees dans les N derniers jours (parametre LinkedIn f_TPR). 0 = off.
 FRESH_DAYS = int(os.getenv("LKD_FRESH_DAYS", "7"))
 REGIE_ONLY = os.getenv("LKD_REGIE_ONLY", "1") != "0"
+# Correctif 7 : le filtre de similarité (score Gemini < SIM_SEUIL_BAS) est
+# DÉCISIONNEL sur les offres NEUVES — actif PAR DÉFAUT ici, à la différence de
+# la proposition initiale du diagnostic (désactivé par défaut) : ce mécanisme
+# tourne déjà en production depuis le 2026-07-22 et a été vérifié le 2026-08-02
+# (cf. Algofi/OPEN, faux négatifs dus au pré-filtre embeddings, corrigés) —
+# le désactiver par défaut reviendrait à revenir en arrière sur un
+# comportement déjà voulu et validé. Coupe-circuit conservé pour retester une
+# évolution du prompt/seuil sans le gate : SIM_FILTRE_ACTIF=0.
+SIM_FILTRE_ACTIF = os.getenv("SIM_FILTRE_ACTIF", "1") != "0"
 # Retire les offres VIVIER (ouvertes mais anciennes) du fichier. Pour les
 # réafficher : LKD_KEEP_VIVIER=1
 DROP_VIVIER = os.getenv("LKD_KEEP_VIVIER", "0") == "0"
@@ -174,6 +183,23 @@ QUERIES = [   # base partagée (rôle + banque + génériques régie)
     "AMOA cash management banque", "chef de projet SIRH banque",
     "AMOA cahier des charges banque", "AMOA recette banque",
     "consultant AMOA fonctionnel banque",
+    # --- 3 pôles sans requête dédiée jusqu'ici (audit du 2026-08-04) : ALM
+    # n'était couvert qu'indirectement par "cash management" (proche mais pas
+    # l'ALM au sens gestion actif-passif) ; Intermédiation boursière et
+    # Planification budgétaire n'avaient AUCUNE requête -> on ne cherchait
+    # jamais ces missions spécifiquement, quelle que soit leur pertinence.
+    "AMOA ALM banque", "consultant ALM bancaire",
+    "AMOA intermédiation boursière", "consultant post-marché banque",
+    "AMOA planification budgétaire banque", "PMO budget banque",
+    # --- Pilotage & Transformation IT bancaire (12e pôle, ajouté le
+    # 2026-07-30) : jusqu'ici couvert seulement INDIRECTEMENT via les requêtes
+    # "PILOTAGE IT" génériques ci-dessus (chef de projet IT/PMO senior/
+    # conduite du changement/gouvernance projet), qui ne nomment pas le
+    # vocabulaire propre au pôle (CMDB, ITSM, Digital Workplace, poste de
+    # travail, socle collaboratif). Requêtes directes ajoutées :
+    "PMO CMDB banque", "PMO ITSM banque",
+    "chef de projet Digital Workplace banque",
+    "PMO poste de travail banque",
 ]
 # Requêtes ciblées par pays : banques qui cherchent un freelance EN DIRECT
 BANK_QUERIES = {
@@ -908,6 +934,17 @@ def merge_reference(scraped_conv, ref_items):
     return merged
 
 
+# Les 12 pôles valides (cf. bloc PÔLES de profil_ideal_corrige.txt). Dupliqué
+# ici en constante simple (plutôt que reparsé depuis le fichier) pour le récap
+# _afficher_recap_poles ci-dessous : à tenir synchronisé si le profil change.
+POLES_VALIDES = [
+    "Crédit & Engagement", "Salle des marchés", "Gestion d'actifs",
+    "Intermédiation boursière", "Paiements & Monétique", "SIRH", "Risques",
+    "Planification budgétaire", "Bancassurance", "KYC & Conformité",
+    "ALM", "Pilotage & Transformation IT bancaire",
+]
+
+
 def is_convenable(a):
     """Offre à retenir pour les onglets 'sourcing' (décide l'AJOUT d'une NOUVELLE
     offre : elle doit être fraîche, en banque, dans le périmètre)."""
@@ -1110,6 +1147,11 @@ def update_excel(path, data_by_country, today):
       - tes colonnes supprimees restent supprimees (on ecrit selon l'en-tete reel) ;
       - seules les NOUVELLES offres sont ajoutees a la suite, marquees ★.
     Si le fichier n'existe pas encore -> creation complete."""
+    try:
+        import similarite as SIM
+        seuil_bas = SIM.SIM_SEUIL_BAS
+    except Exception:
+        seuil_bas = "?"
     if not os.path.exists(path):
         return write_excel(path, data_by_country, today)
     try:
@@ -1233,6 +1275,7 @@ def update_excel(path, data_by_country, today):
                     ws.cell(rr, col).value = a.get(field)
 
         added, ignore_sim = 0, 0
+        proches_bas, proches_haut = [], []     # Correctif 7 : récap bordure de seuil
         for a in conv:
             u = (a.get("url") or "").split("?")[0].rstrip("/")
             if u in existing:
@@ -1243,7 +1286,11 @@ def update_excel(path, data_by_country, today):
             # quotidien ne ramène que les offres proches de l'idéal. L'existant
             # ci-dessus n'est jamais concerné (choix utilisatrice 2026-07-22).
             sv = a.get("sim_verdict")
-            if sv == "HORS_PERIMETRE (similarité)":
+            s = a.get("sim_score")
+            if s is not None:
+                (proches_bas if sv == "HORS_PERIMETRE (similarité)" else proches_haut
+                 ).append((s, a.get("poste", "")))
+            if SIM_FILTRE_ACTIF and sv == "HORS_PERIMETRE (similarité)":
                 ignore_sim += 1
                 continue                     # trop peu similaire -> pas ajoutée
             # Le VERDICT affiché reflète la similarité, sauf CONVENABLE qui
@@ -1258,6 +1305,14 @@ def update_excel(path, data_by_country, today):
         if ignore_sim:
             print(f"  [{title}] {ignore_sim} nouvelle(s) offre(s) écartée(s) par "
                   f"le filtre de similarité (hors profil idéal).")
+        if proches_bas or proches_haut:
+            print(f"  [{title}] récap similarité — "
+                  f"{len(proches_bas)} écartée(s) (score < {seuil_bas}), "
+                  f"{len(proches_haut)} conservée(s) (score >= {seuil_bas}) :")
+            for s, poste in sorted(proches_bas, reverse=True)[:5]:
+                print(f"      côté écarté, proche du seuil : {s:>3} — {poste[:70]}")
+            for s, poste in sorted(proches_haut)[:5]:
+                print(f"      côté conservé, proche du seuil : {s:>3} — {poste[:70]}")
         ws.cell(1, 1).value = f"MISE A JOUR : {today}"
         print(f"  [{title}] {added} nouvelle(s) offre(s) ajoutee(s) a la suite.")
 
@@ -1295,6 +1350,17 @@ def save_vues(vues):
 # -------------------------------------------------------------------- MAIN
 def main():
     args = [a.lower() for a in sys.argv[1:]]
+    # Correctif 6 : purge explicite du cache Gemini, combinable avec les autres
+    # arguments (ex. `reclass france --vider-cache-gemini`). L'invalidation
+    # paresseuse par PROMPT_VERSION (similarite.py) suffit dans la plupart des
+    # cas ; ce flag sert pour une purge immédiate et totale.
+    if "--vider-cache-gemini" in args:
+        args = [a for a in args if a != "--vider-cache-gemini"]
+        import similarite as SIM
+        if SIM.vider_cache_gemini():
+            print("  Cache Gemini (cache_gemini.json) supprimé.")
+        else:
+            print("  Cache Gemini déjà absent.")
     reclass = False
     if args and args[0] in ("reclass", "recla", "cache", "retune"):
         reclass = True          # re-classe à partir du cache, hors ligne
@@ -1369,6 +1435,30 @@ def main():
     conv = sum(len([a for a in out[cc] if is_convenable(a)]) for cc in out)
     print(f"\n===> {conv} offres SCRAPÉES convenables (onglets '(sourcing)') "
           f"+ onglets de base intacts, dans :\n     {written}")
+    _afficher_recap_poles(out)
+
+
+def _afficher_recap_poles(out):
+    """Récapitulatif des offres convenables par pôle métier (demande du
+    2026-08-04) : la donnée `sim_pole` existe déjà (renvoyée par Gemini),
+    ce n'est qu'un comptage. Affiche aussi, à 0, les pôles des 12 valides qui
+    n'apparaissent dans AUCUNE offre convenable de ce run — signal utile pour
+    repérer un pôle que les requêtes de recherche ne couvrent pas encore."""
+    compte = {}
+    for cc in out:
+        for a in out[cc]:
+            if not is_convenable(a):
+                continue
+            pole = (a.get("sim_pole") or "-").strip() or "-"
+            compte[pole] = compte.get(pole, 0) + 1
+    if not compte:
+        return
+    print("\n  RÉCAP OFFRES CONVENABLES PAR PÔLE :")
+    for pole, n in sorted(compte.items(), key=lambda kv: -kv[1]):
+        print(f"    {n:4}  {pole}")
+    manquants = [p for p in POLES_VALIDES if not any(p.lower() in k.lower() for k in compte)]
+    if manquants:
+        print("    0     " + "\n    0     ".join(manquants) + "   (aucune offre convenable sur ce pôle)")
 
 
 if __name__ == "__main__":

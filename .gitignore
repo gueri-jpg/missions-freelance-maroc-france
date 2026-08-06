@@ -31,6 +31,20 @@ DCE_des_Offres/
 *.docx
 *.pptx
 
+# Projets tiers rangés par coïncidence dans ce dossier (leur propre .git/.venv/.env,
+# rien à voir avec le sourcing régie banque — ne jamais les suivre depuis ce repo).
+APPEL_OFFRES/
+APPEL_OFFRES_AFRIQUE/
+
+# Fichiers de mémoire / transcripts Claude Code (données de conversation, jamais
+# à publier, encore moins sur un dépôt qui a été public).
+c--Users-PAVILION-Downloads-A-explorer/
+
+# Sorties de debug / scratch (2026-08)
+tmp_*
+test_output*.txt
+test_classifier_output.txt
+
 # Cache du filtre de similarité (jugements Gemini + embeddings du profil)
 cache_gemini.json
 cache_gemini.json.tmp
@@ -49,3 +63,6 @@ Thumbs.db
 .DS_Store
 .vscode/
 .idea/
+
+# Configuration locale
+.env

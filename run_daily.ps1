@@ -34,6 +34,89 @@ function Maj($t) {
     try { [IO.File]::WriteAllText($majFile, $t, (New-Object Text.UTF8Encoding $true)) } catch {}
 }
 
+function Load-DotEnv {
+    param([string]$path)
+    if (-not (Test-Path $path)) { return }
+
+    foreach ($line in Get-Content $path | Where-Object { $_.Trim() -and -not $_.Trim().StartsWith('#') }) {
+        if ($line -match '^[^#]*=') {
+            $parts = $line -split '=', 2
+            $name = $parts[0].Trim()
+            $value = $parts[1].Trim().Trim('"').Trim("'")
+            if ($name) { Set-Item -Path "env:$name" -Value $value }
+        }
+    }
+}
+
+function Send-ExcelNotification {
+    param(
+        [string]$xlsxFile,
+        [string]$status
+    )
+
+    $smtpServer = $env:SMTP_SERVER
+    $smtpPort   = if ($env:SMTP_PORT) { [int]$env:SMTP_PORT } else { 587 }
+    $smtpUser   = $env:SMTP_USER
+    $smtpPass   = $env:SMTP_PASS
+    $from       = if ($env:FROM_EMAIL) { $env:FROM_EMAIL } else { "rgueriatou@gmail.com" }
+    $to         = if ($env:TUTOR_EMAILS) { $env:TUTOR_EMAILS } else { "Amina.chevalier@cfconsulting.ma,abderrahmane.elbaghdadi@cfconsulting.ma,rgueriatou@gmail.com" }
+    $cc         = if ($env:CC_EMAILS) { $env:CC_EMAILS } else { "rgueriatou@gmail.com" }
+
+    if (-not ($smtpServer -and $smtpUser -and $smtpPass -and $from -and $to)) {
+        Log "Envoi mail ignoré : variables SMTP manquantes (SMTP_SERVER, SMTP_USER, SMTP_PASS, FROM_EMAIL, TUTOR_EMAILS)."
+        return
+    }
+
+    if (-not (Test-Path $xlsxFile)) {
+        Log "Envoi mail ignoré : fichier introuvable $xlsxFile"
+        return
+    }
+
+    try {
+        $securePass = ConvertTo-SecureString $smtpPass -AsPlainText -Force
+        $cred = New-Object System.Management.Automation.PSCredential($smtpUser, $securePass)
+
+        $subject = "Sourcing missions - mise à jour du $status"
+        $body = @"
+Bonjour,
+
+Le run quotidien a généré le fichier suivant :
+$xlsxFile
+
+Statut : $status
+
+Cordialement,
+Automatisation Sourcing
+"@
+
+        $toList = @()
+        if ($to) { $toList = ($to -split '[,;]' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
+        $ccList = @()
+        if ($cc) { $ccList = ($cc -split '[,;]' | ForEach-Object { $_.Trim() } | Where-Object { $_ }) }
+
+        $mailParams = @{
+            From       = $from
+            To         = $toList
+            Subject    = $subject
+            Body       = $body
+            SmtpServer = $smtpServer
+            Port       = $smtpPort
+            UseSsl     = $true
+            Credential = $cred
+            Attachments = $xlsxFile
+        }
+        if ($ccList.Count) { $mailParams.Cc = $ccList }
+
+        Send-MailMessage @mailParams
+        $logMessage = "Mail envoyé à " + ($toList -join ", ")
+        if ($ccList.Count) { $logMessage += " avec CC " + ($ccList -join ", ") }
+        Log $logMessage
+    } catch {
+        Log ("Erreur envoi mail : " + $_.Exception.Message)
+    }
+}
+
+Load-DotEnv (Join-Path $dir ".env")
 Set-Location $dir
 Log "=== Demarrage (mode=$Mode) ==="
 
@@ -66,8 +149,15 @@ if (-not $line) {
 }
 $stamp = Get-Date -Format "dd/MM/yyyy HH:mm"
 $xlsx  = "Sourcing_regie_banque.xlsx"
+$xlsxPath = Join-Path $dir $xlsx
 Maj "DERNIERE MISE A JOUR : $stamp`r`n$line`r`nFichier : $xlsx"
 Log "_DERNIERE_MAJ.txt ecrit"
+
+if ($exitCode -eq 0) {
+    Send-ExcelNotification -xlsxFile $xlsxPath -status "réussie"
+} else {
+    Send-ExcelNotification -xlsxFile $xlsxPath -status "échouée"
+}
 
 # --- Notification Windows ----------------------------------------------------
 # IMPORTANT : il faut un AppId DEJA ENREGISTRE dans Windows, sinon le toast est

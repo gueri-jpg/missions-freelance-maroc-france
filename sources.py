@@ -236,6 +236,116 @@ def collect_free_work(country="france", max_pages=6):
     return out
 
 
+# ------------------------------------------------ FREELANCE-INFORMATIQUE (France + Maroc)
+# HTML statique, pas d'API, pas de login. URL de mission stable et datable :
+# /mission-<slug>-<YYMMDD><ref>. Pas de filtre secteur -> on boucle sur des
+# mots-clés (comme Free-Work). La description complète est déjà dans le HTML
+# de la page de LISTE (tronquée seulement visuellement en CSS via
+# line-clamp-2), donc pas besoin d'aller chercher chaque fiche détail.
+FI_KEYWORDS = [
+    "banque", "bancaire", "AMOA banque", "PMO banque", "chef de projet banque",
+    "AMOA", "PMO", "conduite du changement", "business analyst banque",
+    "chef de projet IT banque", "AMOA monétique", "AMOA finance de marché",
+]
+
+
+def _fi_parse_date(txt, today=None):
+    """'Publiée à l'instant/hier/le JJ/MM' -> ISO. Pas d'année dans 'le JJ/MM' :
+    on prend l'année courante, ou la précédente si ça tombe dans le futur."""
+    import datetime as dt
+    today = today or dt.date.today()
+    t = (txt or "").lower()
+    if "instant" in t or "aujourd" in t:
+        return today.isoformat()
+    if "hier" in t:
+        return (today - dt.timedelta(days=1)).isoformat()
+    m = re.search(r"(\d{2})/(\d{2})", t)
+    if not m:
+        return ""
+    jj, mm = int(m.group(1)), int(m.group(2))
+    try:
+        d = dt.date(today.year, mm, jj)
+    except ValueError:
+        return ""
+    if d > today:
+        d = dt.date(today.year - 1, mm, jj)
+    return d.isoformat()
+
+
+def collect_freelance_informatique(country="france", max_pages=2):
+    """Freelance-Informatique.fr — job board freelance IT généraliste,
+    majoritairement France. Contenu Maroc rare mais présent -> par défaut on
+    route en France, SAUF si la ville matche explicitement un indice Maroc."""
+    if country not in ("maroc", "france"):
+        return []
+    base = "https://www.freelance-informatique.fr/offres-freelance"
+    out, seen = [], set()
+    for kw in FI_KEYWORDS:
+        for page in range(1, max_pages + 1):
+            try:
+                r = requests.get(base, params={"keywords": kw, "page": page},
+                                  headers=HDR, timeout=25)
+                soup = BeautifulSoup(r.text, "lxml")
+            except Exception as e:
+                print(f"  ! Freelance-Informatique ({e})")
+                break
+            cards = soup.select("div.card.job-card-line")
+            if not cards:
+                break
+            for card in cards:
+                a = card.select_one("h2.job-title a")
+                if not a or not a.get("href"):
+                    continue
+                url = a["href"]
+                if not url.startswith("http"):
+                    url = "https://www.freelance-informatique.fr" + url
+                if url in seen:
+                    continue
+                seen.add(url)
+                titre = a.get_text(strip=True)
+                desc_p = card.select_one("p.line-clamp-2")
+                # Le site double-encode certaines entités (&amp;nbsp; -> "&nbsp;"
+                # littéral après un 1er décodage) -> un 2e passage nettoie ça.
+                desc = html.unescape(desc_p.get_text(" ", strip=True)) if desc_p else ""
+                tags = [s.get_text(strip=True) for s in card.select(".tags span")]
+                ville, duree, date_txt = "", "", ""
+                for li in card.select("ul li"):
+                    icon = li.select_one("i")
+                    icls = " ".join(icon.get("class", [])) if icon else ""
+                    txt = li.get_text(" ", strip=True)
+                    if "icon-clock" in icls:
+                        date_txt = txt
+                    elif "icon-map" in icls:
+                        ville = txt
+                    elif "icon-time" in icls:
+                        duree = txt
+                is_maroc = any(h in ville.lower() for h in MOROCCO_HINTS)
+                if country == "maroc" and not is_maroc:
+                    continue
+                if country == "france" and is_maroc:
+                    continue
+                out.append({
+                    "poste": titre,
+                    "entite": "Freelance-Informatique",
+                    "ville": ville,
+                    "url": url,
+                    "date_pub": _fi_parse_date(date_txt),
+                    "posted_relative": date_txt,
+                    "texte": (" ".join(tags) + " " + desc).strip(),
+                    "emploi_label": "Freelance",
+                    "nb_candidats_txt": "",
+                    "cloturee": False,
+                    "open_confirme": True,       # site = missions ouvertes uniquement
+                    "republication": "",
+                    "duree": duree or "NC",
+                    "source": "Freelance-Informatique (ATS)",
+                })
+            if len(cards) < 25:      # dernière page (moins qu'un plein lot)
+                break
+    print(f"  Freelance-Informatique : {len(out)} missions {country}.")
+    return out
+
+
 # ---------------------------------------------------- GEC-ZOHO (SPA, navigateur headless)
 # Indices de pays pour router une mission GEC (le board GEC mêle Maroc ET France).
 GEC_FR_HINTS = ["paris", "france", "seine", "yvelines", "hauts-de", "val-de",
@@ -361,8 +471,11 @@ COLLECTORS = {
     "trusted_advisors": collect_trusted_advisors,
     "werin_group": collect_werin,
     "free_work": collect_free_work,
+    "freelance_informatique": collect_freelance_informatique,
     "gec_zoho": collect_gec_zoho,
     # extensible : capfi, adaptive_it... (à ajouter quand l'endpoint est fiable)
+    # écartés (2026-08-03) : Rekrute.com (403 Forbidden, bloque le scraping) et
+    # mission-freelance.com (résultats chargés en JS + connexion requise).
 }
 
 
