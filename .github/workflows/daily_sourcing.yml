@@ -1,0 +1,56 @@
+name: Sourcing quotidien (missions régie banque)
+
+# Déclencheurs :
+#   - schedule : automatique tous les jours. GitHub n'exécute les crons QUE
+#     depuis la branche par défaut (main) — sans effet tant que ce fichier
+#     n'est pas fusionné. L'heure est en UTC (pas de fuseau horaire dans
+#     `cron`) : 06:00 UTC ≈ 07:00 heure Maroc/France en hiver, 08:00 en été
+#     (Maroc ne change pas d'heure sauf pendant le Ramadan, la France si) —
+#     décalage mineur assumé, à ajuster ici si besoin.
+#   - workflow_dispatch : bouton "Run workflow" sur GitHub, pour tester sans
+#     attendre le cron (utilisé pendant la mise au point sur cette branche).
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout du dépôt
+        uses: actions/checkout@v4
+
+      - name: Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: "pip"
+
+      - name: Installer les dépendances Python
+        run: pip install -r requirements.txt
+
+      - name: Installer Chromium (Playwright, pour GEC-Zoho)
+        run: playwright install --with-deps chromium
+
+      - name: Lancer le pipeline (sync Drive + scrape + classification + mail)
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GDRIVE_SA_KEY_JSON: ${{ secrets.GDRIVE_SA_KEY_JSON }}
+          GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
+          TUTOR_EMAILS: ${{ secrets.TUTOR_EMAILS }}
+          CC_EMAILS: ${{ secrets.CC_EMAILS }}
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
+        run: python run_cloud.py
+
+      - name: Journaux en cas d'échec
+        if: failure()
+        run: echo "Le run a échoué — voir les logs de l'étape précédente pour le détail."
