@@ -12,7 +12,15 @@ name: Sourcing quotidien (missions régie banque)
 on:
   schedule:
     - cron: "0 6 * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "test = verification rapide (Drive/Gemini/SMTP, ~1-2 min, sans scraping) ; full = run complet (45-70 min)"
+        type: choice
+        options:
+          - test
+          - full
+        default: test
 
 jobs:
   scrape:
@@ -33,9 +41,30 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Installer Chromium (Playwright, pour GEC-Zoho)
+        # Inutile pour le test rapide (test_cloud_setup.py n'ouvre pas de
+        # navigateur) : sauté en mode test pour rester sous les 1-2 min.
+        if: github.event.inputs.mode != 'test'
         run: playwright install --with-deps chromium
 
-      - name: Lancer le pipeline (sync Drive + scrape + classification + mail)
+      - name: "Test rapide (Drive / Gemini / SMTP, ~1-2 min)"
+        if: github.event.inputs.mode == 'test'
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GDRIVE_SA_KEY_JSON: ${{ secrets.GDRIVE_SA_KEY_JSON }}
+          GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
+          TUTOR_EMAILS: ${{ secrets.TUTOR_EMAILS }}
+          CC_EMAILS: ${{ secrets.CC_EMAILS }}
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
+        run: python test_cloud_setup.py
+
+      - name: "Run complet (sync Drive + scrape + classification + mail)"
+        if: github.event.inputs.mode != 'test'
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GDRIVE_SA_KEY_JSON: ${{ secrets.GDRIVE_SA_KEY_JSON }}
