@@ -1,0 +1,22 @@
+# Coeur du pipeline (scraping + classification + Excel)
+requests
+beautifulsoup4
+lxml
+openpyxl
+
+# Etage 1 du filtre de similarite (pre-filtre embeddings, optionnel : le
+# pipeline degrade proprement si absent, cf. similarite.py)
+sentence-transformers
+
+# GEC-Zoho (navigateur headless) — necessite aussi `playwright install
+# --with-deps chromium` apres l'installation du package
+playwright
+
+# Etage 2 du filtre de similarite (juge Gemini) — SDK recent uniquement en
+# environnement cloud (l'ancien google-generativeai reste un repli pour les
+# environnements locaux qui l'auraient deja, cf. similarite.py)
+google-genai
+
+# Synchronisation Google Drive (execution depuis GitHub Actions)
+google-api-python-client
+google-auth
