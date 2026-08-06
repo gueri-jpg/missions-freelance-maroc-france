@@ -15,10 +15,14 @@ TMP_DL = "_test_drive_download.xlsx"
 
 def test_drive():
     print("--- Test Google Drive (lecture seule, rien n'est modifié) ---")
-    ok = DRIVE.download("Sourcing_regie_banque.xlsx", TMP_DL)
-    if not ok:
-        print("  ÉCHEC : fichier introuvable dans GDRIVE_FOLDER_ID, ou accès refusé "
-              "(vérifiez le partage avec le compte de service).")
+    # obligatoire=True : ce test doit distinguer un vrai problème (auth,
+    # dossier introuvable, quota...) d'une simple absence de fichier, donc il
+    # attrape lui-même l'exception plutot que de laisser download() la
+    # traiter comme "premier run" (cf. drive_sync.py, incident 2026-08).
+    try:
+        DRIVE.download("Sourcing_regie_banque.xlsx", TMP_DL, obligatoire=True)
+    except Exception as e:
+        print(f"  ÉCHEC : {e}")
         return False
     taille = os.path.getsize(TMP_DL)
     os.remove(TMP_DL)
