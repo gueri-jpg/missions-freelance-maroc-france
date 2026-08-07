@@ -25,6 +25,7 @@ téléchargement du fichier de travail principal échoue pour une vraie raison.
 import io
 import json
 import os
+import time
 
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
@@ -32,7 +33,8 @@ from googleapiclient.http import MediaIoBaseDownload, MediaIoBaseUpload
 
 SCOPES = ["https://www.googleapis.com/auth/drive"]
 
-_SERVICE = None  # mise en cache : un seul client par process
+NB_TENTATIVES = 3
+DELAI_TENTATIVE = 5.0  # secondes, doublé à chaque nouvel essai
 
 
 class DriveSyncError(RuntimeError):
@@ -40,9 +42,16 @@ class DriveSyncError(RuntimeError):
 
 
 def _service():
-    global _SERVICE
-    if _SERVICE is not None:
-        return _SERVICE
+    """Reconstruit un client Drive à CHAQUE appel — pas de cache global.
+
+    Cause réelle observée (2026-08) : un client mis en cache tôt dans le run
+    et réutilisé ~40 minutes plus tard (après le scraping) hérite d'une
+    connexion HTTP que Google a fermée entre-temps pour inactivité -> le
+    tout premier envoi après cette pause échoue systématiquement
+    ("Broken pipe"), toujours le même (le premier de la liste), jamais les
+    suivants (qui repartent sur une connexion fraîche). Reconstruire le
+    client à chaque appel coûte quelques millisecondes, largement rentable
+    contre ce genre d'échec silencieusement reproductible."""
     # .strip() : un secret GitHub copié-collé peut embarquer un retour à la
     # ligne final invisible (cas réel du 2026-08 : GDRIVE_FOLDER_ID terminé
     # par \n, provoquant un "File not found" trompeur — l'ID semblait juste
@@ -53,8 +62,28 @@ def _service():
         raise DriveSyncError("GDRIVE_SA_KEY_JSON non définie")
     info = json.loads(key_json)
     creds = service_account.Credentials.from_service_account_info(info, scopes=SCOPES)
-    _SERVICE = build("drive", "v3", credentials=creds, cache_discovery=False)
-    return _SERVICE
+    return build("drive", "v3", credentials=creds, cache_discovery=False)
+
+
+def _avec_tentatives(operation, description):
+    """Exécute `operation()` avec jusqu'à NB_TENTATIVES essais (backoff
+    exponentiel). Filet de sécurité en plus de la reconstruction du client à
+    chaque appel — couvre aussi les vrais aléas réseau ponctuels, pas
+    seulement la connexion périmée. Ne masque rien : si toutes les tentatives
+    échouent, l'exception de la DERNIÈRE tentative est levée telle quelle."""
+    derniere_erreur = None
+    delai = DELAI_TENTATIVE
+    for essai in range(1, NB_TENTATIVES + 1):
+        try:
+            return operation()
+        except Exception as e:
+            derniere_erreur = e
+            if essai < NB_TENTATIVES:
+                print(f"  [drive] {description} : essai {essai}/{NB_TENTATIVES} "
+                      f"échoué ({e}) — nouvelle tentative dans {delai:.0f}s.")
+                time.sleep(delai)
+                delai *= 2
+    raise derniere_erreur
 
 
 def _folder_id():
@@ -89,8 +118,8 @@ def download(name, local_path, obligatoire=False):
     Toute erreur RÉELLE (auth, réseau, quota, dossier introuvable) lève
     toujours une exception, qu'`obligatoire` soit vrai ou non — ce n'est
     jamais une raison légitime de continuer comme si de rien n'était."""
-    service = _service()
-    file_id = _find_file_id(service, name)
+    file_id = _avec_tentatives(lambda: _find_file_id(_service(), name),
+                                f"recherche de {name}")
     if not file_id:
         if obligatoire:
             raise DriveSyncError(
@@ -99,12 +128,16 @@ def download(name, local_path, obligatoire=False):
                 f"repartir de zéro et risquer d'écraser le vrai fichier.")
         print(f"  [drive] {name} absent sur Drive (premier run) — normal, on continue à vide.")
         return False
-    request = service.files().get_media(fileId=file_id)
-    with open(local_path, "wb") as f:
-        downloader = MediaIoBaseDownload(f, request)
-        done = False
-        while not done:
-            _, done = downloader.next_chunk()
+
+    def _telecharger():
+        request = _service().files().get_media(fileId=file_id)
+        with open(local_path, "wb") as f:
+            downloader = MediaIoBaseDownload(f, request)
+            done = False
+            while not done:
+                _, done = downloader.next_chunk()
+
+    _avec_tentatives(_telecharger, f"téléchargement de {name}")
     print(f"  [drive] {name} téléchargé.")
     return True
 
@@ -118,13 +151,21 @@ def upload(name, local_path):
     if not os.path.exists(local_path):
         print(f"  [drive] {local_path} absent localement — rien à envoyer pour {name}.")
         return
-    service = _service()
-    file_id = _find_file_id(service, name)
-    media = MediaIoBaseUpload(io.FileIO(local_path, "rb"),
-                               mimetype="application/octet-stream", resumable=True)
-    if file_id:
-        service.files().update(fileId=file_id, media_body=media).execute()
-    else:
-        meta = {"name": name, "parents": [_folder_id()]}
-        service.files().create(body=meta, media_body=media).execute()
+    file_id = _avec_tentatives(lambda: _find_file_id(_service(), name),
+                                f"recherche de {name}")
+
+    def _envoyer():
+        # MediaIoBaseUpload reconstruit à CHAQUE tentative : le flux fichier
+        # est consommé une fois utilisé, un retry sur le même objet media
+        # enverrait un fichier vide.
+        media = MediaIoBaseUpload(io.FileIO(local_path, "rb"),
+                                   mimetype="application/octet-stream", resumable=True)
+        service = _service()
+        if file_id:
+            service.files().update(fileId=file_id, media_body=media).execute()
+        else:
+            meta = {"name": name, "parents": [_folder_id()]}
+            service.files().create(body=meta, media_body=media).execute()
+
+    _avec_tentatives(_envoyer, f"envoi de {name}")
     print(f"  [drive] {name} envoyé.")
