@@ -101,16 +101,27 @@ class TestType(unittest.TestCase):
             }, TODAY)
             self.assertFalse(a["hors_domaine"], f"{poste} devrait rester dans le périmètre")
 
-    def test_chef_de_projet_infra_reseau_cyber_est_garde(self):
-        """Correctif 2 (2026-08-03) : contrairement à « SI » nu (trop générique,
-        cf. test_projet_si_urbanisation_ecarte), « chef de projet » suffit à
-        sauver la famille infra/réseau/cyber — structure "chef de projet X" =
-        pilote le domaine X. Régression trouvée en complétant le Correctif 2 :
-        SIGNAL_PILOTAGE_KW (narrow) n'incluait pas "chef de projet", ce qui
-        aurait fait passer "Chef de projet Infrastructure Réseaux" à tort en
-        hors_domaine dès que "réseau" a rejoint EXCLUS_INFRA_SEUL_KW."""
+    def test_chef_de_projet_infra_reseau_cyber_seul_est_ecarte(self):
+        """Revu 2026-08-07 (décision utilisatrice) : contredit sciemment le
+        Correctif 2 du 2026-08-03. « Chef de projet Infrastructure/Réseau/
+        Cyber » exige EN GÉNÉRAL des compétences techniques poussées dans ce
+        domaine, donc hors périmètre — « chef de projet » seul ne suffit plus
+        à sauver cette famille (contrairement au « SI » nu, cf.
+        test_chef_de_projet_si_nu_est_garde). Il faut un signal de pilotage
+        narrow explicite (pmo/amoa/gouvernance/agile...) en plus."""
         for poste in ["Chef de projet Infrastructure Réseaux",
-                      "Chef de projet Infrastructure", "PMO Cybersécurité"]:
+                      "Chef de projet Infrastructure", "Chef de projet Cyber"]:
+            a = classifier({
+                "poste": poste, "entite": "Cabinet X",
+                "texte": "Mission freelance client bancaire. TJM.",
+                "date_pub": "2026-07-14", "emploi_label": "Freelance",
+            }, TODAY)
+            self.assertTrue(a["hors_domaine"], f"{poste} devrait etre hors domaine")
+
+    def test_chef_de_projet_infra_avec_signal_narrow_est_garde(self):
+        """Le signal de pilotage narrow explicite (pmo/gouvernance/amoa...)
+        sauve toujours la famille infra/réseau/cyber, lui."""
+        for poste in ["PMO Cybersécurité", "Chef de Projet Infrastructure / Gouvernance projets"]:
             a = classifier({
                 "poste": poste, "entite": "Cabinet X",
                 "texte": "Mission freelance client bancaire. TJM.",
@@ -433,6 +444,10 @@ class TestMultiEsn(unittest.TestCase):
             self.assertTrue(a["hors_domaine"], f"devrait etre ecarte : {poste}")
 
     def test_jeu_de_test_titres_positifs(self):
+        # NB : "Chef de projet Infrastructure Réseaux" retiré de cette liste
+        # le 2026-08-07 (décision utilisatrice, contredit sciemment le jeu de
+        # test d'origine) — déplacé dans test_jeu_de_test_titres_negatifs,
+        # cf. test_chef_de_projet_infra_reseau_cyber_seul_est_ecarte.
         titres = [
             "Chef de projet Infrastructure / Gouvernance projets",
             "PMO Infra / Production bancaire – Freelance (REF03)",
@@ -440,7 +455,6 @@ class TestMultiEsn(unittest.TestCase):
             "Chef de projet SI – Agile / Jira / Confluence",
             "Responsable applicatif / Chef de projet SI – BPM",
             "Chef de projet SI / Chef de projet AMOA",
-            "Chef de projet Infrastructure Réseaux",
             "Chef de projet SIRH Data Migration",
             "PMO Chef de projet Simulation ALM",
             "Chef de projet Sinistres",
@@ -466,6 +480,10 @@ class TestMultiEsn(unittest.TestCase):
             "Testeur automaticien",
             "Développeur Java Spring",
             "Data Scientist / MLOps",
+            # Ajouté le 2026-08-07 (décision utilisatrice) : "chef de projet"
+            # seul ne suffit plus pour infra/réseau/cyber, cf.
+            # test_chef_de_projet_infra_reseau_cyber_seul_est_ecarte.
+            "Chef de projet Infrastructure Réseaux",
         ]
         for poste in titres:
             a = classifier({"poste": poste, "entite": "X",

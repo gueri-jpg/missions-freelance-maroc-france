@@ -805,10 +805,16 @@ def detect_domaine(poste, texte):
             and not has_any(blob, SIGNAL_PILOTAGE_INFRA_KW)):
         return False, False, True, pilotage_fort
 
-    # 1bis-b) Famille infra/réseau/cyber (Correctif 2) : gardée par le signal
-    # de pilotage LARGE (inclut "chef de projet") — cf. SIGNAL_PILOTAGE_INFRA_KW.
-    if (has_any(blob, EXCLUS_INFRA_SEUL_KW)
-            and not has_any(blob, SIGNAL_PILOTAGE_INFRA_KW)):
+    # 1bis-b) Famille infra/réseau/cyber (revu 2026-08-07, décision
+    # utilisatrice) : « chef de projet » NE suffit PLUS à lui seul — un
+    # « Chef de projet Infrastructure/Réseau/Cyber » exige en général des
+    # compétences techniques poussées dans ce domaine, hors périmètre. Il
+    # faut donc le signal NARROW (pmo/amoa/gouvernance/agile...), pas
+    # SIGNAL_PILOTAGE_INFRA_KW (qui inclut "chef de projet" et ne sert plus
+    # qu'au cas "SI nu" ci-dessus, cf. 1bis-a). Contredit sciemment l'ancien
+    # jeu de test qui gardait "Chef de projet Infrastructure Réseaux" sur ce
+    # seul signal — cf. test_jeu_de_test_titres_negatifs.
+    if has_any(blob, EXCLUS_INFRA_SEUL_KW) and not has_any(blob, SIGNAL_PILOTAGE_KW):
         return False, False, True, pilotage_fort
 
     # 1ter) PAIEMENT DANS LE TEXTE : DESACTIVE le 2026-07-20. Le paiement /
