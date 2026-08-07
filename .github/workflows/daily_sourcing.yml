@@ -1,26 +1,19 @@
 name: Sourcing quotidien (missions régie banque)
 
 # Déclencheurs :
-#   - schedule : automatique tous les jours. GitHub n'exécute les crons QUE
-#     depuis la branche par défaut (main) — sans effet tant que ce fichier
-#     n'est pas fusionné. L'heure est en UTC (pas de fuseau horaire dans
-#     `cron`) : 06:00 UTC ≈ 07:00 heure Maroc/France en hiver, 08:00 en été
-#     (Maroc ne change pas d'heure sauf pendant le Ramadan, la France si) —
-#     décalage mineur assumé, à ajuster ici si besoin.
-#   - workflow_dispatch : bouton "Run workflow" sur GitHub, pour tester sans
-#     attendre le cron (utilisé pendant la mise au point sur cette branche).
+#   - schedule : automatique tous les jours à 06:00 UTC (≈ 07:00 heure
+#     Maroc/France en hiver, 08:00 en été — décalage mineur assumé, à
+#     ajuster ici si besoin). GitHub n'exécute les crons QUE depuis la
+#     branche par défaut (main).
+#   - workflow_dispatch : bouton "Run workflow" sur GitHub, pour relancer
+#     manuellement sans attendre le cron.
+# Mode test retiré (2026-08, phase de mise au point terminée) : le workflow
+# ne fait plus que le run complet. `test_cloud_setup.py` reste dans le dépôt,
+# utilisable en local (`python test_cloud_setup.py`) pour du dépannage.
 on:
   schedule:
     - cron: "0 6 * * *"
-  workflow_dispatch:
-    inputs:
-      mode:
-        description: "test = verification rapide (Drive/Gemini/SMTP, ~1-2 min, sans scraping) ; full = run complet (45-70 min)"
-        type: choice
-        options:
-          - test
-          - full
-        default: test
+  workflow_dispatch: {}
 
 jobs:
   scrape:
@@ -41,30 +34,9 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Installer Chromium (Playwright, pour GEC-Zoho)
-        # Inutile pour le test rapide (test_cloud_setup.py n'ouvre pas de
-        # navigateur) : sauté en mode test pour rester sous les 1-2 min.
-        if: github.event.inputs.mode != 'test'
         run: playwright install --with-deps chromium
 
-      - name: "Test rapide (Drive / Gemini / SMTP, ~1-2 min)"
-        if: github.event.inputs.mode == 'test'
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GDRIVE_SA_KEY_JSON: ${{ secrets.GDRIVE_SA_KEY_JSON }}
-          GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
-          SMTP_SERVER: ${{ secrets.SMTP_SERVER }}
-          SMTP_PORT: ${{ secrets.SMTP_PORT }}
-          SMTP_USER: ${{ secrets.SMTP_USER }}
-          SMTP_PASS: ${{ secrets.SMTP_PASS }}
-          FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
-          TUTOR_EMAILS: ${{ secrets.TUTOR_EMAILS }}
-          CC_EMAILS: ${{ secrets.CC_EMAILS }}
-          PYTHONUTF8: "1"
-          PYTHONIOENCODING: "utf-8"
-        run: python test_cloud_setup.py
-
       - name: "Run complet (sync Drive + scrape + classification + mail)"
-        if: github.event.inputs.mode != 'test'
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GDRIVE_SA_KEY_JSON: ${{ secrets.GDRIVE_SA_KEY_JSON }}
