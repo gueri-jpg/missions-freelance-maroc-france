@@ -75,15 +75,31 @@ class TestType(unittest.TestCase):
             self.assertTrue(a["hors_domaine"], f"{poste} = role hors perimetre")
 
     def test_projet_si_urbanisation_ecarte(self):
-        """RÈGLE MÉTIER : « chef de projet » ne suffit pas — SI / urbanisation
-        sont hors périmètre."""
-        for poste in ["Chef de Projet Urbanisation SI", "Chef de projet SI (H/F)"]:
+        """RÈGLE MÉTIER : « chef de projet » ne suffit pas à sauver
+        URBANISATION (contrairement au « SI » nu depuis le 2026-08-07, cf.
+        test_chef_de_projet_si_nu_est_garde) — reste hors périmètre."""
+        for poste in ["Chef de Projet Urbanisation SI"]:
             a = classifier({
                 "poste": poste, "entite": "Cabinet X",
                 "texte": "Mission freelance client bancaire. TJM.",
                 "date_pub": "2026-07-14", "emploi_label": "Freelance",
             }, TODAY)
             self.assertTrue(a["hors_domaine"], f"{poste} devrait etre hors domaine")
+
+    def test_chef_de_projet_si_nu_est_garde(self):
+        """Revu 2026-08-07 (décision utilisatrice) : « chef de projet » suffit
+        désormais à sauver le « SI » nu, même logique que la famille
+        infra/réseau/cyber (structure "chef de projet X" = pilote X) —
+        contrairement à URBANISATION qui reste hors périmètre seule (cf.
+        test_projet_si_urbanisation_ecarte)."""
+        for poste in ["Chef de projet SI (H/F)", "Chef de projet SI",
+                      "Chef de Projet SI Bancaire"]:
+            a = classifier({
+                "poste": poste, "entite": "Cabinet X",
+                "texte": "Mission freelance client bancaire. TJM.",
+                "date_pub": "2026-07-14", "emploi_label": "Freelance",
+            }, TODAY)
+            self.assertFalse(a["hors_domaine"], f"{poste} devrait rester dans le périmètre")
 
     def test_chef_de_projet_infra_reseau_cyber_est_garde(self):
         """Correctif 2 (2026-08-03) : contrairement à « SI » nu (trop générique,

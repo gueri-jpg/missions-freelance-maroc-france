@@ -788,13 +788,21 @@ def detect_domaine(poste, texte):
     # 1bis) Exclusions conditionnelles : certains mots technico-fonctionnels
     # n'écartent que les profils techniques purs. Un "Chef de projet
     # Infrastructure" reste fonctionnel, mais un "Ingénieur Infrastructure"
-    # est hors périmètre. Un "Chef de projet SI" sans signal pilotage/AMOA/PO
-    # reste hors périmètre.
+    # est hors périmètre.
     blob = f"{poste} {texte}"
-    if ((has_any(blob, EXCLUS_SI_SEUL_KW)
-            or PROJET_SI_RE.search(blob)
-            or SI_TOKEN_RE.search(poste))
-            and not has_any(blob, SIGNAL_PILOTAGE_KW)):
+    if has_any(blob, EXCLUS_SI_SEUL_KW) and not has_any(blob, SIGNAL_PILOTAGE_KW):
+        return False, False, True, pilotage_fort
+
+    # 1bis-a) "SI" nu / "projet SI" (revu 2026-08-07, décision utilisatrice) :
+    # l'acronyme seul reste trop générique pour attester du fonctionnel, MAIS
+    # « chef de projet » (structure "chef de projet X" = pilote X, même
+    # logique que la famille infra/réseau/cyber ci-dessous) suffit désormais à
+    # lever l'exclusion — d'où le signal LARGE ici, pas le narrow. Un « Chef
+    # de Projet Urbanisation SI » reste hors périmètre via 1bis ci-dessus
+    # (déclenché par "urbanisation", gardé par le signal narrow uniquement) :
+    # ce changement ne vise QUE le "SI" nu, pas urbanisation.
+    if ((PROJET_SI_RE.search(blob) or SI_TOKEN_RE.search(poste))
+            and not has_any(blob, SIGNAL_PILOTAGE_INFRA_KW)):
         return False, False, True, pilotage_fort
 
     # 1bis-b) Famille infra/réseau/cyber (Correctif 2) : gardée par le signal
