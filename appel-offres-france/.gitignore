@@ -1,0 +1,28 @@
+# Secrets
+.env
+
+# Données collectées / générées (contiennent potentiellement des données
+# sensibles ou volumineuses — ne pas versionner)
+data/
+logs/
+*.xlsx
+
+# Environnement virtuel Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Playwright
+scripts_explore/
+
+# IDE / OS
+.vscode/
+.idea/
+.claude/
+desktop.ini
+Thumbs.db
+.DS_Store
+
+# Tests
+.pytest_cache/
