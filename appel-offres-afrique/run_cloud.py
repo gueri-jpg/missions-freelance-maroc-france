@@ -15,6 +15,7 @@ Séquence :
   3. Renvoie l'Excel + les caches mis à jour vers Google Drive.
 
 Pas d'envoi de mail pour ce projet (demande explicite)."""
+import os
 import subprocess
 import sys
 
@@ -29,10 +30,16 @@ CACHES_ID = [
 
 def main():
     print("=== Synchronisation Drive (avant le run) ===")
-    DRIVE.download(EXCEL, EXCEL, obligatoire=True)
+    # Sur Drive, un fichier n'a pas de "chemin" (pas de notion de dossier
+    # local) : il faut chercher par son nom seul, tout en le sauvegardant
+    # localement sous data/. Confondre les deux (chercher "data/xxx.xlsx"
+    # sur Drive) fait échouer la recherche à tort ("introuvable") même
+    # quand le fichier existe bien.
+    os.makedirs("data", exist_ok=True)
+    DRIVE.download(os.path.basename(EXCEL), EXCEL, obligatoire=True)
     for nom in CACHES_ID:
         try:
-            DRIVE.download(nom, nom, obligatoire=False)
+            DRIVE.download(os.path.basename(nom), nom, obligatoire=False)
         except Exception as e:
             print(f"  [drive] {nom} : téléchargement échoué ({e}) — on continue "
                   f"sans (cache régénérable).")
@@ -44,10 +51,10 @@ def main():
         print(f"  ! run_collect.py a échoué (exit={exit_code}).")
 
     print("\n=== Synchronisation Drive (après le run) ===")
-    DRIVE.upload(EXCEL, EXCEL)
+    DRIVE.upload(os.path.basename(EXCEL), EXCEL)
     for nom in CACHES_ID:
         try:
-            DRIVE.upload(nom, nom)
+            DRIVE.upload(os.path.basename(nom), nom)
         except Exception as e:
             print(f"  [drive] ERREUR envoi de {nom} : {e}")
 

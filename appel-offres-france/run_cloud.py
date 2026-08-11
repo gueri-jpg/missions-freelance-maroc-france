@@ -15,6 +15,7 @@ Séquence :
   3. Renvoie l'Excel mis à jour vers Google Drive.
 
 Pas d'envoi de mail pour ce projet (demande explicite)."""
+import os
 import subprocess
 import sys
 
@@ -31,7 +32,13 @@ ETAPES = [
 
 def main():
     print("=== Synchronisation Drive (avant le run) ===")
-    DRIVE.download(EXCEL, EXCEL, obligatoire=True)
+    # Sur Drive, un fichier n'a pas de "chemin" (pas de notion de dossier
+    # local) : il faut chercher par son nom seul ("veille_appels_offres.xlsx"),
+    # tout en le sauvegardant localement sous data/. Confondre les deux
+    # (chercher "data/veille_appels_offres.xlsx" sur Drive) fait échouer la
+    # recherche à tort ("introuvable") même quand le fichier existe bien.
+    os.makedirs(os.path.dirname(EXCEL), exist_ok=True)
+    DRIVE.download(os.path.basename(EXCEL), EXCEL, obligatoire=True)
 
     exit_code = 0
     for etape in ETAPES:
@@ -43,7 +50,7 @@ def main():
             exit_code = 1
 
     print("\n=== Synchronisation Drive (après le run) ===")
-    DRIVE.upload(EXCEL, EXCEL)
+    DRIVE.upload(os.path.basename(EXCEL), EXCEL)
 
     sys.exit(exit_code)
 
