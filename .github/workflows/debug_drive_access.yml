@@ -1,0 +1,50 @@
+name: DEBUG temporaire - acces Drive appel-offres
+
+# Workflow de diagnostic UNIQUEMENT : ne telecharge/n'envoie rien, verifie
+# juste si le compte de service voit reellement les 2 dossiers Drive cibles
+# par GDRIVE_FOLDER_ID_FRANCE / GDRIVE_FOLDER_ID_AFRIQUE. A supprimer une
+# fois le probleme d'acces resolu.
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  debug-france:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: appel-offres-france
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install google-api-python-client google-auth
+      - name: "Debug acces dossier France"
+        env:
+          GDRIVE_SA_KEY_JSON: ${{ secrets.GDRIVE_SA_KEY_JSON }}
+          GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID_FRANCE }}
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
+        run: python debug_drive.py
+
+  debug-afrique:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: appel-offres-afrique
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install google-api-python-client google-auth
+      - name: "Debug acces dossier Afrique"
+        env:
+          GDRIVE_SA_KEY_JSON: ${{ secrets.GDRIVE_SA_KEY_JSON }}
+          GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID_AFRIQUE }}
+          PYTHONUTF8: "1"
+          PYTHONIOENCODING: "utf-8"
+        run: python debug_drive.py
